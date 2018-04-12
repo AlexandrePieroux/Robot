@@ -10,15 +10,26 @@ classdef Robot < handle
     end
     
     methods
-        function obj = Robot(width, length, range, maxlv, minav, maxav) 
-            obj.width = width;
-            obj.length = length;
+        function obj = Robot(range, maxlv, minav, maxav) 
             obj.hokuyo = Hokuyo(range);
             obj.wheels = Wheels(maxlv, minav, maxav);
         end
         
         function init(obj, api, vrep)
             [res, obj.handle] = api.simxGetObjectHandle(vrep, 'youBot_center', api.simx_opmode_oneshot_wait); vrchk(api, res);
+
+            % Get the width of the youbot
+            [res, vehicleControl] = api.simxGetObjectHandle(vrep, 'vehicleControl', api.simx_opmode_oneshot_wait); vrchk(api, res);
+            [res, minX] = api.simxGetObjectFloatParameter(vrep, vehicleControl, 15, api.simx_opmode_oneshot_wait); vrchk(api, res);
+            [res, maxX] = api.simxGetObjectFloatParameter(vrep, vehicleControl, 18, api.simx_opmode_oneshot_wait); vrchk(api, res);
+            
+            obj.width = maxX - minX;
+
+            % Get the height of the youbot
+            [res, minY] = api.simxGetObjectFloatParameter(vrep, vehicleControl, 16, api.simx_opmode_oneshot_wait); vrchk(api, res);
+            [res, maxY] = api.simxGetObjectFloatParameter(vrep, vehicleControl, 19, api.simx_opmode_oneshot_wait); vrchk(api, res);
+            
+            obj.height = maxY - minY;
 
             %Init the components
             obj.hokuyo.init(api, vrep, obj.handle);
@@ -28,14 +39,6 @@ classdef Robot < handle
             api.simxSetIntegerSignal(vrep, 'displaylasers', 1, api.simx_opmode_oneshot); 
         end
         
-        function drivePath(obj, path)
-          % Mecanum wheels equations
-          % maxav == max angular velocity ?
-          frontLeftWheel = velocity * sin(-angle+pi/4) - obj.wheels.maxav
-          frontRightWheel = velocity * cos(-angle+pi/4) + obj.wheels.maxav
-          rearLeftWheel = velocity * cos(-angle+pi/4) - obj.wheels.maxav
-          rearRightWheel = velocity * sin(-angle+pi/4) + obj.wheels.maxav
-        end
     end
     
 end

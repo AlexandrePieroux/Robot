@@ -20,7 +20,7 @@ classdef Brain < handle
             obj.robot = robot;
             obj.classTreshold = classTreshold;
             obj.controller = RobotController();
-            
+                        
             %Initialize the controller
             obj.controller.init(api, vrep, robot, scale);
             
@@ -67,15 +67,29 @@ classdef Brain < handle
         function drive(obj)
             obj.updateData();
             obj.map.update(obj.robot.hokuyo);
+                        
+            %sl_pursuit;
+            % set_param('sl_pursuit', 'waypoints', robotpath);
+            %r = sim('sl_pursuit');
+               
+            angle = 45;
+            velocity = obj.robot.wheels.maxlv
+            angularSpeed = obj.robot.wheels.maxav
             
-            % THERE
-            while(obj.updateWheelsTrajectory())
-                obj.setWheelsSpeed();
-                obj.updateData();
-                obj.map.update(obj.robot.hokuyo);
-            end
-
-            obj.controller.setWheelsSpeed(0, 0, 0, 0);
+            % Dimensions of the youbot
+            a = 16.2/200; % distance from center of wheel to horizontal mid robot
+            b = 35.7/200; % distance from center of wheel to vertical mid robot
+            r = 5/100;    % wheel radius 
+            
+            J = 1/r * [
+                1 1 (a+b);
+                1 -1 -(a+b);
+                1 1 -(a+b);
+                1 -1 (a+b)
+            ]
+        
+            wheelsSpeed = J*[sin(velocity); cos(velocity); angularSpeed]
+            obj.controller.setWheelsSpeed(wheelsSpeed(2), wheelsSpeed(3), wheelsSpeed(1), wheelsSpeed(4));
         end
         
         function ret = updateWheelsTrajectory(obj)

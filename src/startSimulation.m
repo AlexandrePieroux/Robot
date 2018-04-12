@@ -22,7 +22,7 @@ function startSimulation()
   api.simxStartSimulation(vrep, api.simx_opmode_oneshot_wait);
 
   disp('Setting up the robot informations');
-  robot = Robot(0.17, 0.36, 5, 6, 1.5, 2.5);  
+  robot = Robot(5, 6, 1.5, 2.5);  
   
   disp('Creating a brain');
   brain = Brain();
