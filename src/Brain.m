@@ -1,11 +1,13 @@
 classdef Brain < handle
     
     properties
+        vrep;
         robot;
         controller;
         map;
         wheelsTrajectory;
         classTreshold;
+        
         %ExpandData
         expander;
         dimExpander;
@@ -13,7 +15,8 @@ classdef Brain < handle
     end
     
     methods
-        function obj = Brain()
+        function obj = Brain(vrep)
+            obj.vrep = vrep;
         end
         
         function init(obj, api, vrep, robot, scale, radianPrecision, classTreshold)
@@ -64,32 +67,64 @@ classdef Brain < handle
             %obj.robot.hokuyo.hits = kron(obj.robot.hokuyo.hits, ones(obj.dimExpander(1), 1)) + repmat(obj.expander, dimHits(1), 1);
         end
         
-        function drive(obj)
+        function drive(obj, path)
+            % Update data
             obj.updateData();
             obj.map.update(obj.robot.hokuyo);
-                        
-            %sl_pursuit;
-            % set_param('sl_pursuit', 'waypoints', robotpath);
-            %r = sim('sl_pursuit');
-               
-            angle = 45;
-            velocity = obj.robot.wheels.maxlv
-            angularSpeed = obj.robot.wheels.maxav
             
-            % Dimensions of the youbot
-            a = 16.2/200; % distance from center of wheel to horizontal mid robot
-            b = 35.7/200; % distance from center of wheel to vertical mid robot
-            r = 5/100;    % wheel radius 
+            % Interpolate the trajectory
+            vseg = [0.3 0.3]; % Max speed on each axis
+            dseg = [];        % Duration per each segment
+            dt = 0.01;        % Sample interval
+            at = 0.05;        % Acceleration time
             
-            J = 1/r * [
-                1 1 (a+b);
-                1 -1 -(a+b);
-                1 1 -(a+b);
-                1 -1 (a+b)
-            ]
-        
-            wheelsSpeed = J*[sin(velocity); cos(velocity); angularSpeed]
-            obj.controller.setWheelsSpeed(wheelsSpeed(2), wheelsSpeed(3), wheelsSpeed(1), wheelsSpeed(4));
+            % Test path
+            path =[ 
+              5  -5.25;
+            ];
+            
+            robotInitialPose = obj.controller.getSe2().T;
+            robotInitialPose = [robotInitialPose(1,3) robotInitialPose(2,3)];
+            
+            robotpath = mstraj(path, vseg, dseg, robotInitialPose, dt, at);
+            tseg = numrows(robotpath) * dt;
+            lispaceRes = linspace(0, tseg, numrows(robotpath));
+            
+            tic;
+            timeOld = 0;
+            while(true) % While we have points to go
+                
+                % Time computation
+                timeNew = toc;
+                timeDelta = timeNew - timeOld + 0.15;
+                timeOld = timeNew;
+                
+                curGoal = interp1(lispaceRes, robotpath, timeNew);
+                if (isnan(curGoal))
+                    obj.controller.setWheelsSpeed(0, 0, 0, 0);
+                    break;
+                end
+                    
+                % Compute the point relative to the robot pose
+                goalToRobot = homtrans(obj.controller.getSe2Inv().T, curGoal');
+
+                % Compute the distance and angle to the point
+                distance = sqrt(goalToRobot(1)^2 + goalToRobot(2)^2);
+                velocity = distance/timeDelta;
+
+                %velocity = goalToRobot(2)/goalToRobot(1);
+                angle = atan2(goalToRobot(2), goalToRobot(1));
+                angularVelocity = angle/timeDelta;
+
+                velocities = [  velocity * cos(angle);
+                                velocity * sin(angle);
+                                min(angularVelocity, 0.3);
+                                0;
+                             ];
+
+                wheelsSpeed = obj.robot.Ja * velocities;
+                obj.controller.setWheelsSpeed(wheelsSpeed(4), wheelsSpeed(1), wheelsSpeed(3), wheelsSpeed(2));
+            end
         end
         
         function ret = updateWheelsTrajectory(obj)
@@ -109,37 +144,6 @@ classdef Brain < handle
                     ret = true;
                 end
             end
-        end
-        
-        function setWheelsSpeed(obj)
-            targetPose = obj.robot.pose \ obj.wheelsTrajectory(:,:,1);
-            targetAngle = SO3Utils.getZAngle(targetPose);
-            
-            %Horizontal and vertical speeds
-            if obj.map.onCell(obj.robot.pose, obj.wheelsTrajectory(:,:,1))
-                vx = 0;
-                vy = 0;
-            else
-                [vy, vx, ~] = transl(targetPose);
-                v = sqrt(vx^2+vy^2);
-                while v < obj.robot.wheels.maxlv,
-                    vx=vx*2;
-                    vy=vy*2;
-                    v = sqrt(vx^2+vy^2);
-                end
-                vx = vx * obj.robot.wheels.maxlv / v;
-                vy = vy * obj.robot.wheels.maxlv / v;
-            end
-            
-            %Angular speed
-            if(obj.map.inOrientation(obj.robot.pose, obj.wheelsTrajectory(:,:,1)))
-                va = 0;
-            else
-                va = targetAngle / pi;
-                va = (va/abs(va)) * obj.robot.wheels.minav + va * (obj.robot.wheels.maxav - obj.robot.wheels.minav);
-            end
-            
-            obj.controller.setWheelsSpeed(-vx-vy+va, -vx+vy+va, -vx+vy-va, -vx-vy-va);
         end
         
         function explore(obj)
@@ -244,105 +248,6 @@ classdef Brain < handle
                 ret = true;
             end
         end
-        
-        function generateWheelsTrajectory(obj, ds, start, isRobot, rpos)
-            if(isRobot)
-                trajPath = rot90(ds.path(start), 2);
-                trajPath = [trajPath; fliplr(start)];
-                trajPath = trajPath(2:end,:); 
-            else
-                trajPath = fliplr(ds.path(start));
-            end
-                        
-            pathSize = size(trajPath);
-            if pathSize(1) > 1
-                precDirection = obj.getDirection(rpos, trajPath(1,:));
-                precPoint = trajPath(1,:);
-                j = 1;
-                i = 2;
-                while(i < pathSize(1))
-                    direction = obj.getDirection(precPoint, trajPath(i,:));
-                    if(not(strcmp(direction, precDirection) == 0))
-                        obj.wheelsTrajectory(:,:,j) = obj.getPose(precDirection, precPoint);
-                        j = j + 1;
-                    end
-                    precDirection = direction;
-                    precPoint = trajPath(i,:);
-                    i = i + 1;
-                end
-                obj.wheelsTrajectory(:,:,j) = obj.getPose(precDirection, precPoint);
-            else
-                obj.wheelsTrajectory = [];
-            end
-        end
-        
-        function pose = getPose(obj, direction, target)
-            pose = transl((target(1) - obj.map.offset(1)) / obj.map.scale, (target(2) - obj.map.offset(2)) / obj.map.scale, 0);
-            switch(direction)
-                case 'up'
-                    pose = pose * trotz(pi/2 + pi/2);
-                case 'upleft'
-                    pose = pose * trotz(3*pi/4 + pi/2);
-                case 'upright'
-                    pose = pose * trotz(pi/4 + pi/2);
-                case 'down'
-                    pose = pose * trotz(-pi/2 + pi/2);
-                case 'downleft'
-                    pose = pose * trotz(-pi/4 + pi/2);
-                case 'downright'
-                    pose = pose * trotz(-3*pi/4 + pi/2);
-                case 'right'
-                    pose = pose * trotz(-pi + pi/2);
-                case 'left'
-                    pose = pose * trotz(pi + pi/2);
-                    
-            end
-        end
-        
-        function direction = getDirection(~, source, target)
-            if source(2) < target(2)
-                %Up
-                if source(1) < target(1)
-                    %Right
-                    direction = 'upright';
-                else
-                    if source(1) > target(1)
-                        %Left
-                        direction = 'upleft';
-                    else
-                        direction = 'up';
-                    end
-                end
-            else
-                if source(2) > target(2)
-                    %Down
-                    if source(1) < target(1)
-                        %Right
-                        direction = 'downright';
-                    else
-                        if source(1) > target(1)
-                            %Left
-                            direction = 'downleft';
-                        else
-                            direction = 'down';
-                        end
-                    end
-                else 
-                    if source(1) < target(1)
-                        %Right
-                        direction = 'right';
-                    else
-                        if source(1) > target(1)
-                            %Left
-                            direction = 'left';
-                        else
-                            direction = 'none';
-                        end
-                    end
-                end
-            end
-        end
     end
-    
 end
 

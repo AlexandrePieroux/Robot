@@ -25,7 +25,7 @@ function startSimulation()
   robot = Robot(5, 6, 1.5, 2.5);  
   
   disp('Creating a brain');
-  brain = Brain();
+  brain = Brain(vrep);
   
   disp('Brain initialization');
   brain.init(api, vrep, robot, 4, pi/90, 4);

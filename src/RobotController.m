@@ -47,7 +47,8 @@ classdef RobotController < handle
             [res1, ~, auxData1, auxPacketInfo1] = obj.api.simxReadVisionSensor(obj.vrep, obj.robot.hokuyo.firstHandle, obj.api.simx_opmode_blocking); vrchk(obj.api, res1, true);
             [res2, ~, auxData2, auxPacketInfo2] = obj.api.simxReadVisionSensor(obj.vrep, obj.robot.hokuyo.secondHandle, obj.api.simx_opmode_blocking); vrchk(obj.api, res2, true);
             
-            % Poses, relative to the absolute frame
+            % Poses, relative to the absolute frame (robot is upside down)
+            obj.robot.se2 = SE2(arcPos(1), arcPos(2), arcOri(3) - pi/2);
             obj.robot.pose = transl(arcPos) * trotx(arcOri(1)) * troty(arcOri(2)) * trotz(arcOri(3));
             obj.robot.hokuyo.firstPose = obj.robot.pose * transl(rh1Pos) * trotx(rh1Ori(1)) * troty(rh1Ori(2)) * trotz(rh1Ori(3));
             obj.robot.hokuyo.secondPose = obj.robot.pose * transl(rh2Pos) * trotx(rh2Ori(1)) * troty(rh2Ori(2)) * trotz(rh2Ori(3));
@@ -82,10 +83,24 @@ classdef RobotController < handle
         function setWheelsSpeed(obj, flS, rlS, frS, rrS)
             res = obj.api.simxPauseCommunication(obj.vrep, true); vrchk(obj.api, res);
             obj.api.simxSetJointTargetVelocity(obj.vrep, obj.robot.wheels.flHandle, flS, obj.api.simx_opmode_oneshot);
-            obj.api.simxSetJointTargetVelocity(obj.vrep, obj.robot.wheels.rlHandle, rlS,obj.api.simx_opmode_oneshot);
+            obj.api.simxSetJointTargetVelocity(obj.vrep, obj.robot.wheels.rlHandle, rlS, obj.api.simx_opmode_oneshot);
             obj.api.simxSetJointTargetVelocity(obj.vrep, obj.robot.wheels.frHandle, frS, obj.api.simx_opmode_oneshot);
             obj.api.simxSetJointTargetVelocity(obj.vrep, obj.robot.wheels.rrHandle, rrS, obj.api.simx_opmode_oneshot);
             res = obj.api.simxPauseCommunication(obj.vrep, false); vrchk(obj.api, res);
+        end
+        
+        % Test Functions: these will go in the update date function after
+        % validation.
+        function res = getSe2Inv(obj)
+            [res, arcPos] = obj.api.simxGetObjectPosition(obj.vrep, obj.robot.handle, -1, obj.api. simx_opmode_blocking); vrchk(obj.api, res, true);
+            [res, arcOri] = obj.api.simxGetObjectOrientation(obj.vrep, obj.robot.handle, -1, obj.api.simx_opmode_blocking); vrchk(obj.api, res, true);
+            res = SE2(arcPos(1), arcPos(2), arcOri(3) - pi/2).inv();
+        end
+        
+        function res = getSe2(obj)
+            [res, arcPos] = obj.api.simxGetObjectPosition(obj.vrep, obj.robot.handle, -1, obj.api. simx_opmode_blocking); vrchk(obj.api, res, true);
+            [res, arcOri] = obj.api.simxGetObjectOrientation(obj.vrep, obj.robot.handle, -1, obj.api.simx_opmode_blocking); vrchk(obj.api, res, true);
+            res = SE2(arcPos(1), arcPos(2), arcOri(3) - pi/2);
         end
     end
     
