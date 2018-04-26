@@ -84,7 +84,7 @@ classdef Dstar < Navigation
         % info kept per cell (state)
         b       % backpointer (0 means not set)
         t       % tag: NEW OPEN CLOSED
-        h       % distance map, path cost
+        %h       % distance map, path cost
         
         validplan   % a plan has been computed for current costmap
         
@@ -101,6 +101,7 @@ classdef Dstar < Navigation
     end
     
     properties (SetAccess=private, GetAccess=public)
+        h       % distance map, path cost
         niter
         costmap   % world cost map: obstacle = Inf
     end

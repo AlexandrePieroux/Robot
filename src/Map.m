@@ -1,111 +1,67 @@
 classdef Map < handle
     
     properties
-        content;
-        size;
-        scale;
-        radianPrecision;
-        increasingFactor;
         offset;
+        resolution;
+        content;
     end
   
     methods
-        function obj = Map(centerCoor, width, length, scale, radianPrecision, increasingFactor)
-            x = increasingFactor * scale * 2 + 1;
-            obj.size = [x, x];
-            obj.scale = scale;
-            obj.radianPrecision = radianPrecision;
-            centerCoor = centerCoor * scale;
-            centerPos = increasingFactor * scale + 1;
-            obj.offset = [centerPos-centerCoor(1), centerPos-centerCoor(2)];
-            obj.content = zeros(x);
-            obj.content(centerPos-ceil(scale * width / 2):centerPos+ceil(scale * width / 2), centerPos-ceil(scale * length / 2):centerPos+ceil(scale * length / 2)) = -Inf;
-            obj.increasingFactor = increasingFactor;
+        function obj = Map(resolution)
+            obj.offset = [0 0];
+            obj.resolution = 1/resolution;
+            obj.content = sparse(0);
         end
         
         function update(obj, data)
-            hits(:,1) = ceil(data.hits(:,1) * obj.scale + obj.offset(1) - 0.5);
-            hits(:,2) = ceil(data.hits(:,2) * obj.scale + obj.offset(2) - 0.5);
-            hits = unique(hits, 'rows');
-            voids(:,1) = ceil(data.surface(:,1) * obj.scale + obj.offset(1) - 0.5);
-            voids(:,2) = ceil(data.surface(:,2) * obj.scale + obj.offset(2) - 0.5);
-            voids = unique(voids, 'rows');
-            % ?OPTIMIZE?
-            voids = setdiff(voids, hits, 'rows');
-
-            % If needed, resize the map
-            % Check if we have a large enough content matrix
-            mins = min([hits; voids]);
-            maxs = max([hits; voids]);
-
-            % ?OPTIMIZE?
-            update = false;
-            if mins(1) < 1
-                update = true;
-                moreXBefore = obj.increasingFactor * obj.scale;
-            else
-                moreXBefore = 0;
-            end
-
-            if mins(2) < 1
-                update = true;
-                moreYBefore = obj.increasingFactor * obj.scale;
-            else
-                moreYBefore = 0;
-            end
-
-            if maxs(1) > obj.size(1)
-                update = true;
-                moreXAfter = obj.increasingFactor * obj.scale;
-            else
-                moreXAfter = 0;
-            end
-
-            if maxs(2) > obj.size(2)
-                update = true;
-                moreYAfter = obj.increasingFactor * obj.scale;
-            else
-                moreYAfter = 0;
-            end
-
-            if update 
-                % Update the content matrix
-                obj.content = padarray(obj.content, [moreXBefore, moreYBefore], 0, 'pre');
-                obj.content = padarray(obj.content, [moreXAfter, moreYAfter], 0, 'post');
-
-                % Update the offset
-                obj.offset = obj.offset + [moreXBefore, moreYBefore];
-                hits(:,1) = hits(:,1) + moreXBefore;
-                hits(:,2) = hits(:,2) + moreYBefore;
-                voids(:,1) = voids(:,1) + moreXBefore;
-                voids(:,2) = voids(:,2) + moreYBefore;
-
-                % Update the size
-                obj.size = obj.size + [moreXBefore+moreXAfter, moreYBefore+moreYAfter];
-            end
-
-            % Insert hokuyo data in the new map
-            for i  = 1:length(hits)
-                obj.content(hits(i,1), hits(i,2)) = obj.content(hits(i,1), hits(i,2)) + 1;
-            end
-
-            for i = 1:length(voids)
-                obj.content(voids(i,1), voids(i,2)) = obj.content(voids(i,1), voids(i,2)) - 1;
-            end
-        end
-        
-        function boolean = inOrientation(obj, this, that)
-            thisAngle = SO3Utils.getZAngle(this);
-            thatAngle = SO3Utils.getZAngle(that);
+            % Retrive the smallest coordinate to use it as offset
+            % Only minimum here matter.
+            minHitX = round(min(data.hits(:,1)) * obj.resolution);
+            minHitY = round(min(data.hits(:,2)) * obj.resolution);
             
-            boolean = abs(angdiff(thisAngle, thatAngle)) <= obj.radianPrecision;
+            % Compute the offset difference
+            offsetDiffX = obj.offset(1) - min(minHitX, obj.offset(1));
+            offsetDiffY = obj.offset(2) - min(minHitY, obj.offset(2));
+            
+            % Rebuild sparse matrix with offset
+            [i, j, s] = find(obj.content);
+            if ~isempty([i, j , s])
+                i = i + offsetDiffX;
+                j = j + offsetDiffY;
+                obj.content = sparse(double(i), double(j), s);
+            end
+            
+            % Keep the smallest offset
+            obj.offset = min([minHitX minHitY], obj.offset);
+
+            % Rescale the points for them to be in the map
+            % As the matrices only support positive integer indexing we
+            % scale the result and offset it.
+            hits(:,1) = round(data.hits(:,1) * obj.resolution + abs(obj.offset(1)));
+            hits(:,2) = round(data.hits(:,2) * obj.resolution + abs(obj.offset(2)));
+            hits = unique(hits, 'rows');
+                        
+            hits(:,1) = hits(:,1) + 1;
+            hits(:,2) = hits(:,2) + 1;
+            
+            sizeRow = size(obj.content, 1);
+            sizeColumn = size(obj.content, 2);
+           
+            % Insert hokuyo data in the map
+            for n  = 1:length(hits)
+                if hits(n,1) > sizeRow || hits(n,2) > sizeColumn
+                    obj.content(hits(n,1), hits(n,2)) = 1;
+                else
+                    obj.content(hits(n,1), hits(n,2)) = obj.content(hits(n,1), hits(n,2)) + 1;
+                end
+            end
         end
         
         function print(obj)
             figure(2);
             colormap('hot');
             imagesc(obj.content);
-            caxis([-400,400]);
+            caxis([-10,10]);
             colorbar;
             drawnow;
         end

@@ -22,13 +22,14 @@ function startSimulation()
   api.simxStartSimulation(vrep, api.simx_opmode_oneshot_wait);
 
   disp('Setting up the robot informations');
-  robot = Robot(5, 6, 1.5, 2.5);  
+  % Range, max x velocity, max y velocity and max angular velocity
+  robot = Robot(5, 0.3, 0.3, 0.3);  
   
   disp('Creating a brain');
   brain = Brain(vrep);
   
   disp('Brain initialization');
-  brain.init(api, vrep, robot, 4, pi/90, 4);
+  brain.init(api, vrep, robot, 0.01, pi/90, 2);
   
   disp('Fly little bird, fly');
   brain.work();

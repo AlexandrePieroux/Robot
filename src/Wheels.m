@@ -7,17 +7,10 @@ classdef Wheels < handle
     rlHandle;
     frHandle;
     rrHandle;
-    
-    maxlv;
-    minav;
-    maxav;
   end
   
   methods
-    function obj = Wheels(maxlv, minav, maxav)
-        obj.maxlv = maxlv;
-        obj.minav = minav;
-        obj.maxav = maxav;
+    function obj = Wheels()
     end
     
     function init(obj, api, vrep)   

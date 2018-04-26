@@ -24,7 +24,6 @@ classdef RobotController < handle
             [x, y] = meshgrid(-obj.robot.hokuyo.range:1/scale:obj.robot.hokuyo.range, -obj.robot.hokuyo.range:1/scale:obj.robot.hokuyo.range);
             obj.xGrid = reshape(x, [], 1);
             obj.yGrid = reshape(y, [], 1);
-            
             obj.rangeLimit = obj.robot.hokuyo.range - 0.0001;
             
             obj.updateData();
@@ -33,7 +32,7 @@ classdef RobotController < handle
         
         function updateData(obj)
             % Robot center, relative to the absolute frame
-            [res, arcPos] = obj.api.simxGetObjectPosition(obj.vrep, obj.robot.handle, -1, obj.api. simx_opmode_blocking); vrchk(obj.api, res, true);
+            [res, arcPos] = obj.api.simxGetObjectPosition(obj.vrep, obj.robot.handle, -1, obj.api.simx_opmode_blocking); vrchk(obj.api, res, true);
             [res, arcOri] = obj.api.simxGetObjectOrientation(obj.vrep, obj.robot.handle, -1, obj.api.simx_opmode_blocking); vrchk(obj.api, res, true);
 
             % Hokuyo1, relative to the robot center frame
@@ -47,12 +46,15 @@ classdef RobotController < handle
             [res1, ~, auxData1, auxPacketInfo1] = obj.api.simxReadVisionSensor(obj.vrep, obj.robot.hokuyo.firstHandle, obj.api.simx_opmode_blocking); vrchk(obj.api, res1, true);
             [res2, ~, auxData2, auxPacketInfo2] = obj.api.simxReadVisionSensor(obj.vrep, obj.robot.hokuyo.secondHandle, obj.api.simx_opmode_blocking); vrchk(obj.api, res2, true);
             
-            % Poses, relative to the absolute frame (robot is upside down)
+            % SE(2) relative to the absolute frame (robot is upside down)
             obj.robot.se2 = SE2(arcPos(1), arcPos(2), arcOri(3) - pi/2);
-            obj.robot.pose = transl(arcPos) * trotx(arcOri(1)) * troty(arcOri(2)) * trotz(arcOri(3));
-            obj.robot.hokuyo.firstPose = obj.robot.pose * transl(rh1Pos) * trotx(rh1Ori(1)) * troty(rh1Ori(2)) * trotz(rh1Ori(3));
-            obj.robot.hokuyo.secondPose = obj.robot.pose * transl(rh2Pos) * trotx(rh2Ori(1)) * troty(rh2Ori(2)) * trotz(rh2Ori(3));
-       
+            obj.robot.se2Inv = obj.robot.se2.inv();
+            
+            % Robot pose and hokuyo poses relatives to robot
+            obj.robot.pose = SE3(rotx(arcOri(1)) * roty(arcOri(2)) * rotz(arcOri(3) - pi/2), arcPos');
+            obj.robot.hokuyo.firstPose = obj.robot.pose * SE3(rotx(rh1Ori(1)) * roty(rh1Ori(2)) * rotz(rh1Ori(3)), rh1Pos');
+            obj.robot.hokuyo.secondPose = obj.robot.pose * SE3(rotx(rh2Ori(1)) * roty(rh2Ori(2)) * rotz(rh2Ori(3)), rh2Pos');
+                   
             width = auxData1(auxPacketInfo1(1) + 1);
             height = auxData1(auxPacketInfo1(1) + 2);
             h1points = reshape(auxData1((auxPacketInfo1(1) + 2 + 1):end), 4, width*height);
@@ -66,18 +68,20 @@ classdef RobotController < handle
             h2points = homtrans(obj.robot.hokuyo.secondPose, h2points(1:3,:));
 
             % Hit points
-            obj.robot.hokuyo.hits = [h1points(1:2,h1hits), h2points(1:2,h2hits)]';
+            obj.robot.hokuyo.hits = [h1points(1:2,h1hits) h2points(1:2,h2hits)]';
 
             % Surface points
-            mask =  [h1points, h2points]; 
-            [h1x, h1y, ~] = transl(obj.robot.hokuyo.firstPose);
-            [h2x, h2y, ~] = transl(obj.robot.hokuyo.secondPose);
-            [rx, ry, ~] = transl(obj.robot.pose);
-            xPoly = obj.xGrid + rx;
-            yPoly = obj.yGrid + ry;
+            %mask =  [h1points h2points]; 
+            %[h1x, h1y, ~] = transl(obj.robot.hokuyo.firstPose);
+            %[h2x, h2y, ~] = transl(obj.robot.hokuyo.secondPose);
+            %[rx, ry, ~] = transl(obj.robot.pose);
+            %xPoly = obj.xGrid + rx;
+            %yPoly = obj.yGrid + ry;
 
-            in = inpolygon(xPoly, yPoly, [h1x mask(1, :) h2x], [h1y mask(2, :) h2y]);
-            obj.robot.hokuyo.surface = [xPoly(in) yPoly(in)];
+            %in = inpolygon(xPoly, yPoly, [h1x mask(1, :) h2x], [h1y mask(2, :) h2y]);
+            %obj.robot.hokuyo.surface = [xPoly(in) yPoly(in)];
+            
+            obj.robot.hokuyo.surface = [h1points(1:2,:)' h2points(1:2,:)'];
         end
         
         function setWheelsSpeed(obj, flS, rlS, frS, rrS)
@@ -88,20 +92,7 @@ classdef RobotController < handle
             obj.api.simxSetJointTargetVelocity(obj.vrep, obj.robot.wheels.rrHandle, rrS, obj.api.simx_opmode_oneshot);
             res = obj.api.simxPauseCommunication(obj.vrep, false); vrchk(obj.api, res);
         end
-        
-        % Test Functions: these will go in the update date function after
-        % validation.
-        function res = getSe2Inv(obj)
-            [res, arcPos] = obj.api.simxGetObjectPosition(obj.vrep, obj.robot.handle, -1, obj.api. simx_opmode_blocking); vrchk(obj.api, res, true);
-            [res, arcOri] = obj.api.simxGetObjectOrientation(obj.vrep, obj.robot.handle, -1, obj.api.simx_opmode_blocking); vrchk(obj.api, res, true);
-            res = SE2(arcPos(1), arcPos(2), arcOri(3) - pi/2).inv();
-        end
-        
-        function res = getSe2(obj)
-            [res, arcPos] = obj.api.simxGetObjectPosition(obj.vrep, obj.robot.handle, -1, obj.api. simx_opmode_blocking); vrchk(obj.api, res, true);
-            [res, arcOri] = obj.api.simxGetObjectOrientation(obj.vrep, obj.robot.handle, -1, obj.api.simx_opmode_blocking); vrchk(obj.api, res, true);
-            res = SE2(arcPos(1), arcPos(2), arcOri(3) - pi/2);
-        end
+  
     end
     
 end

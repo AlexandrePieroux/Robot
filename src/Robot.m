@@ -1,29 +1,41 @@
 classdef Robot < handle
     
     properties
+        % Api identifier
         handle;
+        
+        % Pose information
         pose;
         se2;
+        se2Inv;
+        
+        % Physical information
         width;
         length;
+        
+        % Component objects
         hokuyo;
         wheels;
         
         % Kinematic information
-        Ja;
-        JaInv;
+        maxv;  % Max speed on each axis [x y]
+        maxav; % Max angular speed
+        Ja;    % Augmented forward kinematic matrix
+        JaInv; % Augmented inverse kinematic matrix
     end
     
     methods
-        function obj = Robot(range, maxlv, minav, maxav) 
+        function obj = Robot(range, maxx, maxy, maxav) 
             obj.hokuyo = Hokuyo(range);
-            obj.wheels = Wheels(maxlv, minav, maxav);
+            obj.wheels = Wheels();
+            obj.maxv = [maxx maxy];
+            obj.maxav = maxav;
         end
         
         function init(obj, api, vrep)
             [res, obj.handle] = api.simxGetObjectHandle(vrep, 'youBot_center', api.simx_opmode_oneshot_wait); vrchk(api, res);
 
-            % Get the handle of the vehicle control
+            % Get the handle of the vehicle con trol
             [res, vehicleControl] = api.simxGetObjectHandle(vrep, 'vehicleControl', api.simx_opmode_oneshot_wait); vrchk(api, res);
             
             % Get the width of the youbot
@@ -37,7 +49,7 @@ classdef Robot < handle
             [res, maxY] = api.simxGetObjectFloatParameter(vrep, vehicleControl, 19, api.simx_opmode_oneshot_wait); vrchk(api, res);
             
             obj.length = maxY - minY;
-            
+           
             % We know that the youbot in longer than wider
             if obj.length < obj.width
                 tmp = obj.length;
