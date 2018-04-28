@@ -29,7 +29,7 @@ function startSimulation()
   brain = Brain(vrep);
   
   disp('Brain initialization');
-  brain.init(api, vrep, robot, 0.01, pi/90, 2);
+  brain.init(api, vrep, robot, 0.1, 2);
   
   disp('Fly little bird, fly');
   brain.work();

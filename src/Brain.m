@@ -31,25 +31,25 @@ classdef Brain < handle
             obj.vrep = vrep;
         end
         
-        function init(obj, api, vrep, robot, scale, radianPrecision, classTreshold)
+        function init(obj, api, vrep, robot, scale, classTreshold)
             obj.robot = robot;
             obj.classTreshold = classTreshold;
             obj.controller = RobotController();
                         
             %Initialize the controller
-            obj.controller.init(api, vrep, robot, scale);
-            
-            if(obj.robot.length > obj.robot.width)
-                obj.inflateRay = obj.robot.length/2;
-            else
-                obj.inflateRay = obj.robot.width/2;
-            end
+            obj.controller.init(api, vrep, robot);
+            obj.inflateRay = obj.robot.length/2;
             
             %Initialize the map
             obj.map = Map(scale);
+            obj.map.insertRobot(robot);
+            obj.inflateRay = obj.inflateRay * obj.map.resolution;
             
             %Do a barrel roll
             obj.barrelRoll();
+            
+            %obj.path = [-2, -5.25];
+            %obj.drive();
         end
         
         function work(obj)      
@@ -72,11 +72,11 @@ classdef Brain < handle
             wheelsSpeed = obj.robot.Ja * velocities;
             obj.controller.setWheelsSpeed(wheelsSpeed(4), wheelsSpeed(1), wheelsSpeed(3), wheelsSpeed(2));
             
-            timeToAchieve = 35;
+            timeToAchieve = 35.5;
             timeStart = tic;
             while(true)
                 obj.controller.updateData();
-                obj.map.update(obj.robot.hokuyo);
+                obj.map.update(obj.robot.hokuyo.hits);
                 if toc(timeStart) > timeToAchieve
                     obj.controller.setWheelsSpeed(0, 0, 0, 0);
                     break;
@@ -87,7 +87,7 @@ classdef Brain < handle
         function drive(obj)
             % Update data
             obj.updateData();
-            obj.map.update(obj.robot.hokuyo);
+            obj.map.update(obj.robot.hokuyo.hits);
             
             % Get robot cartesian position regardless orientation
             robotInitialPose = obj.robot.se2.T;
@@ -102,7 +102,7 @@ classdef Brain < handle
             timeOld = 0;
             while(true) % While we have points to go
                 obj.controller.updateData();
-                obj.map.update(obj.robot.hokuyo);
+                obj.map.update(obj.robot.hokuyo.hits);
                 
                 % Time computation
                 % We add 0.45 sec in order to never reach the goal
@@ -223,26 +223,35 @@ classdef Brain < handle
         
         function ret = setNextExplorationTrajectory(obj)
             obj.map.print();
-            ds = Dstar(uint16(obj.map.content >= obj.classTreshold), {'inflate', obj.inflateRay});
+            ds = Dstar(double(obj.map.content >= obj.classTreshold), {'inflate', obj.inflateRay}, {'progress'});
             [x, y, ~] = transl(obj.robot.pose);
-            rpos = [ceil(y * obj.map.scale + obj.map.offset(2) - 0.5), ceil(x * obj.map.scale + obj.map.offset(1) - 0.5)];
-            ds.plan(rpos);
+            [rposR, rposC] = obj.map.world2Map(x, y);
+            ds.plan([abs(rposR), abs(rposC)]);
             
             distanceMap = ds.h;
             distanceMap(obj.map.content <= -obj.classTreshold | obj.map.content >= obj.classTreshold) = Inf;
             
             [~, i] = min(distanceMap(:));
-            [row, col] = ind2sub(size(distanceMap), i);
+            [row,col] = ind2sub(size(distanceMap), i);
             
-            disp('going to');
-            [row, col]
+            % Transform the point in the real world
+            [realX, realY] = obj.map.map2World(row, col);
             
-            %Ok jusque la
+            disp('Going to');
+            [realX, realY]
+            
             if distanceMap(row, col) == Inf 
                 obj.path = [];
                 ret = false;
             else
-                obj.path = [row, col];
+                obj.path = ds.query([row, col]);
+                
+                % Plot path on map representation
+                hold on;
+                plot(obj.path(:,1), obj.path(:,2), 'g')
+                
+                % Inverting the path since we plan from the robot pose
+                [obj.path(:,1), obj.path(:,2)] = obj.map.map2World(flipud(obj.path(:,1)), flipud(obj.path(:,2)));
                 ret = true;
             end
         end

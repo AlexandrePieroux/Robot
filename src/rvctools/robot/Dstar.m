@@ -269,7 +269,7 @@ classdef Dstar < Navigation
             
             % number of free cells, upper bound on number of iterations, trapped free
             % cells will never be reached
-            nfree = prod(size(ds.occgridnav)) - sum(sum(ds.occgridnav > 0));
+            nfree = numel(ds.occgridnav) - sum(sum(ds.occgridnav > 0));
             nupdate = round(nfree/100);
             
             while true  
