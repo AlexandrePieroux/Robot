@@ -5,19 +5,27 @@ classdef RobotController < handle
         vrep;
         robot;
         rangeLimit;
+        
+        xGrid;
+        yGrid;
     end
     
     methods
         function obj = RobotController()
         end
         
-        function init(obj, api, vrep, robot)
+        function init(obj, api, vrep, robot, scale)
             obj.robot = robot;
             obj.robot.init(api, vrep);
 
             obj.api = api;
             obj.vrep = vrep;
-                        
+            
+            % Initialize the grids
+            [x, y] = meshgrid(-obj.robot.hokuyo.range:scale:obj.robot.hokuyo.range, -obj.robot.hokuyo.range:scale:obj.robot.hokuyo.range);
+            obj.xGrid = reshape(x, [], 1);
+            obj.yGrid = reshape(y, [], 1);
+            
             obj.rangeLimit = obj.robot.hokuyo.range - 0.0001;
             
             obj.updateData();
@@ -65,7 +73,18 @@ classdef RobotController < handle
             h2points = homtrans(obj.robot.hokuyo.secondPose, h2points(1:3,:));
 
             % Hit points
-            obj.robot.hokuyo.hits = [h1points(1:2,h1hits) h2points(1:2,h2hits)]';  
+            obj.robot.hokuyo.hits = [h1points(1:2,h1hits) h2points(1:2,h2hits)]';
+            
+            % Void points
+            [rx, ry, ~] = transl(obj.robot.pose);
+            [h1x, h1y, ~] = transl(obj.robot.hokuyo.firstPose);
+            [h2x, h2y, ~] = transl(obj.robot.hokuyo.secondPose);
+            mask =  [h1points, h2points]; 
+            xPoly = obj.xGrid + rx;
+            yPoly = obj.yGrid + ry;
+
+            in = inpolygon(xPoly, yPoly, [h1x mask(1, :) h2x], [h1y mask(2, :) h2y]);
+            obj.robot.hokuyo.voidPoints = [xPoly(in), yPoly(in)];
         end
         
         function setWheelsSpeed(obj, flS, rlS, frS, rrS)

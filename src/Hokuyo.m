@@ -7,7 +7,7 @@ classdef Hokuyo < handle
         secondPose;
         range;
         hits;
-        surface;
+        voidPoints;
     end
     
     methods
@@ -15,7 +15,7 @@ classdef Hokuyo < handle
             obj.range = range;
         end
         
-        function init(obj, api, vrep, centerHandle)
+        function init(obj, api, vrep)
             [res, obj.firstHandle] = api.simxGetObjectHandle(vrep, 'fastHokuyo_sensor1', api.simx_opmode_oneshot_wait); vrchk(api, res);
             [res, obj.secondHandle] = api.simxGetObjectHandle(vrep, 'fastHokuyo_sensor2', api.simx_opmode_oneshot_wait); vrchk(api, res);
             

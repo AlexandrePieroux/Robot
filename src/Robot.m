@@ -58,7 +58,7 @@ classdef Robot < handle
             end
 
             %Init the wheels and the sensors components
-            obj.hokuyo.init(api, vrep, obj.handle);
+            obj.hokuyo.init(api, vrep);
             obj.wheels.init(api, vrep);
             
             % Get the kinematic information of the youbot

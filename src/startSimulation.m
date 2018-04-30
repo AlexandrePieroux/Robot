@@ -7,7 +7,7 @@ function startSimulation()
   api.simxFinish(-1);
   vrep = api.simxStart('127.0.0.1', 19997, true, true, 2000, 5);
 
-  if vrep < 0,
+  if vrep < 0
     disp('Failed connecting to remote API server. Exiting.');
     api.delete();
     return;
@@ -23,13 +23,13 @@ function startSimulation()
 
   disp('Setting up the robot informations');
   % Range, max x velocity, max y velocity and max angular velocity
-  robot = Robot(5, 0.3, 0.3, 0.3);  
+  robot = Robot(5, 0.2, 0.2, 0.2);  
   
   disp('Creating a brain');
   brain = Brain(vrep);
   
   disp('Brain initialization');
-  brain.init(api, vrep, robot, 0.1, 2);
+  brain.init(api, vrep, robot, 0.1, 4);
   
   disp('Fly little bird, fly');
   brain.work();
