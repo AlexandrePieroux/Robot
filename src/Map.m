@@ -16,10 +16,10 @@ classdef Map < handle
         function insertRobot(obj, robot)
             % Get the effective row and col in the map of the robot pose
             [x, y, ~] = transl(robot.pose);
-            minX = x - robot.width/2;
+            minX = x - robot.length/2;
             minY = y - robot.length/2;
             
-            maxX = x + robot.width/2;
+            maxX = x + robot.length/2;
             maxY = y + robot.length/2;
             
             % Updating the offset if needed
@@ -68,6 +68,7 @@ classdef Map < handle
             % Rebuild sparse matrix with offset
             [r, c, v] = find(obj.content);
             if ~isempty([r, c])
+                offsetDiffRow
                 r = r + offsetDiffRow;
                 c = c + offsetDiffCol;
                 obj.content = sparse(double(r), double(c), v);
@@ -99,7 +100,7 @@ classdef Map < handle
                 if mapVoids(n,1) > size(obj.content, 1) || mapVoids(n,2) > size(obj.content, 2)
                     obj.content(mapVoids(n,1), mapVoids(n,2)) = 1;
                 else
-                    obj.content(mapVoids(n,1), mapVoids(n,2)) = obj.content(mapVoids(n,1), mapVoids(n,2)) -1;
+                    obj.content(mapVoids(n,1), mapVoids(n,2)) = obj.content(mapVoids(n,1), mapVoids(n,2)) - 1;
                 end
             end
         end

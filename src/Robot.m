@@ -12,6 +12,9 @@ classdef Robot < handle
         % Physical information
         width;
         length;
+        a;
+        b;
+        r;
         
         % Component objects
         hokuyo;
@@ -63,26 +66,26 @@ classdef Robot < handle
             
             % Get the kinematic information of the youbot
             [res, vector] = api.simxGetObjectPosition(vrep, obj.wheels.frHandle, obj.wheels.flHandle, api.simx_opmode_oneshot_wait); vrchk(api, res);
-            a = vector(1)/2; % Distance from center of wheel to the mid width of the robot
+            obj.a = vector(1)/2; % Distance from center of wheel to the mid width of the robot
             
             [res, vector] = api.simxGetObjectPosition(vrep, obj.wheels.frHandle, obj.wheels.rrHandle, api.simx_opmode_oneshot_wait); vrchk(api, res);
-            b = vector(2)/2; % Distance from center of wheel to the length of the robot
+            obj.b = vector(2)/2; % Distance from center of wheel to the length of the robot
             
             % Compute the jacobian augmented forwad kinematic matrix of the youbot
-            r = obj.wheels.wheelRadius;
-            obj.Ja = 1/r * [
-                1   1   (a+b)   1;
-                1  -1  -(a+b)   1;
-                1   1  -(a+b)  -1;
-                1  -1   (a+b)  -1
+            obj.r = obj.wheels.wheelRadius;
+            obj.Ja = 1/obj.r * [
+                1   1   (obj.a+obj.b)   1;
+                1  -1  -(obj.a+obj.b)   1;
+                1   1  -(obj.a+obj.b)  -1;
+                1  -1   (obj.a+obj.b)  -1
             ];
         
             % Compute the augmented inverse kinematics of the youbot
-            obj.JaInv = r/4 * [
+            obj.JaInv = obj.r/4 * [
                 1        1        1        1;
                 1       -1        1       -1;
-                1/(a+b) -1/(a+b) -1/(a+b)  1/(a+b);
-                4/r      4/r     -4/r     -4/r
+                1/(obj.a+obj.b) -1/(obj.a+obj.b) -1/(obj.a+obj.b)  1/(obj.a+obj.b);
+                4/obj.r      4/obj.r     -4/obj.r     -4/obj.r
             ];
                         
             % Display the red laser beams of active sensors

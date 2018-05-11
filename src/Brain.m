@@ -19,8 +19,8 @@ classdef Brain < handle
         
         % Path interpolation data
         dseg = [];        % Duration per each segment
-        dt = 0.01;        % Sample interval
-        at = 0.05;        % Acceleration time
+        dt = 0.1;        % Sample interval
+        at = 1.5;        % Acceleration time
         
         % Data
         path;
@@ -38,7 +38,7 @@ classdef Brain < handle
                         
             %Initialize the controller
             obj.controller.init(api, vrep, robot, scale);
-            obj.inflateRay = obj.robot.length;
+            obj.inflateRay = sqrt(obj.robot.length^2 + obj.robot.width^2)/2 * 2.2;
             
             %Initialize the map
             obj.map = Map(scale);
@@ -46,10 +46,16 @@ classdef Brain < handle
             obj.inflateRay = obj.inflateRay * obj.map.resolution;
             
             %Do a barrel roll
-            obj.barrelRoll();
+            %%%%%%%%%% DEBUG %%%%%%%%%%%%%
+            %obj.barrelRoll();
         end
         
-        function work(obj)      
+        function work(obj)
+            
+            %%%%%%%%%% DEBUG %%%%%%%%%%%%%
+            load('map.mat');
+            obj.map = mapSave;
+            
             obj.explore();
             %obj.dispatch();
         end
@@ -97,18 +103,95 @@ classdef Brain < handle
         end
         
         function drive(obj)
+            
+            function [res, timeSeg] = getHeadings(robot, path, dt)
+                % Get SE3 robot pose with z axis rotation
+                robotPose = robot.pose;
+                timeSeg = [];
+                
+                % Initialise rotation variables
+                curPose = SE3(robotPose.R * rotz(-pi/2), robotPose.t);
+                res = tr2rpy(curPose);
+                res = res(3);
+                curP = transl(curPose);
+                curP = curP(1:2);
+                robotMaxV = sqrt(robot.maxv(1)^2 + robot.maxv(2)^2);
+                
+                for n = 1:numrows(path)
+                    % Get next cartesian point and compute heading angle
+                    nextP = path(n,:);
+                    nextOri = atan2(nextP(2) - curP(2), nextP(1) - curP(1));
+                    
+                    % Get time for translation and rotation
+                    nextPose = SE3(rotz(nextOri), [nextP, 0]');
+                    relativePose = curPose.inv.T * nextPose.T;
+                    
+                    translTime = transl(relativePose);
+                    translTime = sqrt(translTime(1)^2 + translTime(2)^2);
+                    translTime = abs(translTime)/robotMaxV;
+                    
+                    rotTime = tr2rpy(relativePose);
+                    rotTime = abs(rotTime(3))/robot.maxav;
+                    
+                    % The slowest composant limit the other
+                    timeTrav = max(translTime, rotTime);
+                    timeSeg = [timeSeg; timeTrav];
+                    
+                    % Orientation interpolation if needed
+                    relAngle = tr2rpy(relativePose);
+                    relAngle = relAngle(3);
+                    if round(relAngle, 3) ~= 0
+                        % Interpolation using Quaternion function
+                        rotSteps = ceil(rotTime/dt) - 1;
+                        curPoseQ = UnitQuaternion(curPose.T);
+                        nextPoseQ = UnitQuaternion(nextPose.T);
+                        resInterpQ = curPoseQ.interp(nextPoseQ, [0:rotSteps]'/rotSteps, 'shortest');
+
+                        % Taking z rotation
+                        anglesToAdd = tr2rpy(resInterpQ.R);
+                        anglesToAdd = anglesToAdd(:,3);
+
+                        % Rotate as fast as possible
+                        if rotTime < translTime
+                            additionalSteps = ceil(translTime/dt) - rotSteps + 1;
+                            anglesToAdd = [anglesToAdd; repelem(anglesToAdd(end), additionalSteps)'];
+                        end
+
+                        % Add interpolation to the result
+                        res = [res; anglesToAdd];
+                    else
+                        lastOri = tr2rpy(curPose);
+                        lastOri = repelem(lastOri(3), ceil(translTime/dt))';
+                        res = [res; lastOri];
+                    end
+                    
+                    curPose = nextPose;
+                    curP = nextP;
+                end
+            end
+            
             % Update data
             obj.updateData();
             obj.map.update(obj.robot.hokuyo.hits, obj.robot.hokuyo.voidPoints);
+            
+            % Transform path into waypoints 
+            [wayPoints(:,1), wayPoints(:,2)] = reducem(obj.path(:,1), obj.path(:,2), 0.01);
+            wayPoints = wayPoints(2:end,:);
             
             % Get robot cartesian position regardless orientation
             robotInitialPose = obj.robot.se2.T;
             robotInitialPose = [robotInitialPose(1,3) robotInitialPose(2,3)];
             
-            % Plane the trajectory using quintic polynomial and heuristics
-            robotpath = mstraj(obj.path, obj.robot.maxv, obj.dseg, robotInitialPose, obj.dt, obj.at);
-            tseg = numrows(robotpath) * obj.dt;
-            lispaceRes = linspace(0, tseg, numrows(robotpath));
+            % Plane the trajectory
+            [rotpath, obj.dseg] = getHeadings(obj.robot, wayPoints, obj.dt);
+            
+            % Plane the translational trajectory using quintic polynomial and heuristics
+            translpath = mstraj(wayPoints, [], obj.dseg, robotInitialPose, obj.dt, obj.at);
+            plot(translpath(:,1), translpath(:,2))
+            tseg = numrows(translpath) * obj.dt;
+            lispaceTransl = linspace(0, tseg, numrows(translpath));
+            tseg = numrows(rotpath) * obj.dt;
+            lispaceRot = linspace(0, tseg, numrows(rotpath));
             
             timeRef = tic;
             timeOld = 0;
@@ -117,13 +200,13 @@ classdef Brain < handle
                 obj.map.update(obj.robot.hokuyo.hits, obj.robot.hokuyo.voidPoints);
                 
                 % Time computation
-                % We add 0.45 sec in order to never reach the goal
                 timeNew = toc(timeRef);
-                timeDelta = (timeNew - timeOld) + 0.45;
+                timeDelta = (timeNew - timeOld) + 0.2;
                 timeOld = timeNew;
                 
-                curGoal = interp1(lispaceRes, robotpath, timeNew);
-                if (isnan(curGoal))
+                curGoal = interp1(lispaceTransl, translpath, timeNew);
+                curRot = interp1(lispaceRot, rotpath, timeNew);
+                if isnan([curGoal, curRot])
                     obj.controller.setWheelsSpeed(0, 0, 0, 0);
                     break;
                 end
@@ -134,16 +217,19 @@ classdef Brain < handle
                 % Compute the distance to the point and then derive the
                 % velocity.
                 distance = sqrt(goalToRobot(1)^2 + goalToRobot(2)^2);
-                velocity = distance/timeDelta;
+                translAngle = atan2(goalToRobot(2), goalToRobot(1));
+                velocity = min(abs(distance/timeDelta), sqrt(obj.robot.maxv(1)^2 + obj.robot.maxv(2)^2));
+                velocity = velocity * sign(distance);
 
                 % Compute angle to the point to the point and then derive the
-                % angular velocity.
-                angle = atan2(goalToRobot(2), goalToRobot(1));
-                angularVelocity = angle/timeDelta;
-                angularVelocity = min(abs(angularVelocity), obj.robot.maxav) * sign(angularVelocity);
+                % angular velocity.             
+                relativeAngle = wrapTo2Pi(curRot) - wrapTo2Pi(obj.robot.se2.angle());
+                angularVelocity = min(abs(relativeAngle/timeDelta), obj.robot.maxav);
+                angularVelocity = angularVelocity * sign(relativeAngle);
 
-                velocities = [  velocity * cos(angle);
-                                velocity * sin(angle);
+                velocities = [  
+                                velocity * cos(translAngle);
+                                velocity * sin(translAngle);
                                 angularVelocity;
                                 0;
                              ];
@@ -232,13 +318,13 @@ classdef Brain < handle
             
             [v, i] = min(distanceMap(:));
             [row, col] = ind2sub(size(distanceMap), i);
+            %[goalX, goalY] = obj.map.map2World(row, col);
             
             if v == Inf 
                 obj.path = [];
                 ret = false;
             else
                 obj.path = ds.query([col, row]);
-                obj.path
                 
                 % Plot path on map representation
                 obj.map.print();
@@ -247,6 +333,10 @@ classdef Brain < handle
                 
                 % Inverting the path since we plan from the robot pose
                 [obj.path(:,1), obj.path(:,2)] = obj.map.map2World(flipud(obj.path(:,2)), flipud(obj.path(:,1)));
+                
+                % Don't let it bump into obstacle it does not know
+                newEnd = round(size(obj.path, 1) * 0.2);
+                obj.path = obj.path(1:newEnd,:);
                 ret = true;
             end
         end
