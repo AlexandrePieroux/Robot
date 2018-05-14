@@ -19,7 +19,7 @@ classdef Brain < handle
         
         % Path interpolation data
         dseg = [];        % Duration per each segment
-        dt = 0.1;        % Sample interval
+        dt = 0.2;        % Sample interval
         at = 1.5;        % Acceleration time
         
         % Data
@@ -47,14 +47,14 @@ classdef Brain < handle
             
             %Do a barrel roll
             %%%%%%%%%% DEBUG %%%%%%%%%%%%%
-            %obj.barrelRoll();
+            obj.barrelRoll();
         end
         
         function work(obj)
             
             %%%%%%%%%% DEBUG %%%%%%%%%%%%%
-            load('map.mat');
-            obj.map = mapSave;
+            %load('map.mat');
+            %obj.map = mapSave;
             
             obj.explore();
             %obj.dispatch();
@@ -67,7 +67,7 @@ classdef Brain < handle
         
         function discoverMap(obj)
             while(obj.setNextExplorationTrajectory())
-                obj.drive();
+                obj.drive(true);
             end
         end
         
@@ -81,28 +81,94 @@ classdef Brain < handle
             %obj.robot.hokuyo.hits = kron(obj.robot.hokuyo.hits, ones(obj.dimExpander(1), 1)) + repmat(obj.expander, dimHits(1), 1);
         end
         
-        function barrelRoll(obj)   
-            velocities = [  0;
-                            0;
-                            0.3;
-                            0;   ];
-
-            wheelsSpeed = obj.robot.Ja * velocities;
-            obj.controller.setWheelsSpeed(wheelsSpeed(4), wheelsSpeed(1), wheelsSpeed(3), wheelsSpeed(2));
+        function barrelRoll(obj)  
+            function headings = rotate2Pi(robot, orientation, dt)
+                % Get robot pose and pi rotation pose
+                curOri = orientation;
+                curAngle = tr2rpy(orientation);
+                curAngle = curAngle(3);
+                
+                headings = [];
+                    
+                ori(:,:,1) = orientation * rotz(pi/2);
+                ori(:,:,2) = orientation * rotz(pi);
+                ori(:,:,3) = orientation * rotz(3*pi/2);
+                ori(:,:,4) = orientation * rotz(2*pi);
             
-            timeToAchieve = 35.5;
-            timeStart = tic;
-            while(true)
+                for n=1:size(ori, 3)
+                    nextOri = ori(:,:,n);
+                    nextAngle = tr2rpy(nextOri);
+                    nextAngle = nextAngle(3);
+
+                    nextOri(1:2,3) = 0;
+                    curOri(1:2,3) = 0;
+                    
+                    % Compute the time needed according to robot specs
+                    rotTime = pi - abs(abs(curAngle - nextAngle) - pi); 
+                    rotTime = rotTime/robot.maxav;
+                    rotTime = ceil(rotTime/dt) - 1;
+
+                    % Interpolation using unit quaternion
+                    robotOriQ = UnitQuaternion(curOri);
+                    nextPoseQ = UnitQuaternion(nextOri);
+                    res = robotOriQ.interp(nextPoseQ, [0:rotTime]'/rotTime, 'shortest');
+
+                    % Return the angle interpolation
+                    res = tr2rpy(res.R);
+                    res = res(:,3); 
+                    
+                    curOri = nextOri;
+                    curAngle = nextAngle;
+                    headings = [headings; res];
+                end
+            end
+            
+            % Plane the trajectory
+            rotpath = rotate2Pi(obj.robot, obj.robot.se2.T, obj.dt);
+            
+            % Plane the rotation
+            tseg = numrows(rotpath) * obj.dt;
+            lispaceRot = linspace(0, tseg, numrows(rotpath));
+            
+            timeRef = tic;
+            timeOld = 0;
+            while(true) % While we have points to go
                 obj.controller.updateData();
                 obj.map.update(obj.robot.hokuyo.hits, obj.robot.hokuyo.voidPoints);
-                if toc(timeStart) > timeToAchieve
+
+                % Time computation
+                timeNew = toc(timeRef);
+                timeDelta = (timeNew - timeOld);
+                timeOld = timeNew;
+
+                timeInterp = timeNew + (timeDelta * 1.5);
+                curRot = interp1(lispaceRot, rotpath, timeInterp);
+                if isnan(curRot)
                     obj.controller.setWheelsSpeed(0, 0, 0, 0);
                     break;
                 end
+
+                % Compute angle to the point to the point and then derive the
+                % angular velocity.       
+                relativeAngle = wrapToPi(curRot - obj.robot.se2.angle());
+                angularVelocity = min(abs(relativeAngle/timeDelta), obj.robot.maxav * 1.2);
+                angularVelocity = angularVelocity * sign(relativeAngle);
+
+                velocities = [  
+                                0;
+                                0;
+                                angularVelocity;
+                                0;
+                             ];
+
+                % Use the augmented jacobian matrice of the kinematic to
+                % get wheel speed.
+                wheelsSpeed = obj.robot.Ja * velocities;
+                obj.controller.setWheelsSpeed(wheelsSpeed(4), wheelsSpeed(1), wheelsSpeed(3), wheelsSpeed(2));
             end
         end
         
-        function drive(obj)
+        function drive(obj, reduce)
             
             function [res, timeSeg] = getHeadings(robot, path, dt)
                 % Get SE3 robot pose with z axis rotation
@@ -115,6 +181,7 @@ classdef Brain < handle
                 res = res(3);
                 curP = transl(curPose);
                 curP = curP(1:2);
+                curOri = res;
                 robotMaxV = sqrt(robot.maxv(1)^2 + robot.maxv(2)^2);
                 
                 for n = 1:numrows(path)
@@ -130,8 +197,9 @@ classdef Brain < handle
                     translTime = sqrt(translTime(1)^2 + translTime(2)^2);
                     translTime = abs(translTime)/robotMaxV;
                     
-                    rotTime = tr2rpy(relativePose);
-                    rotTime = abs(rotTime(3))/robot.maxav;
+                    rotTime = pi - abs(abs(curOri - nextOri) - pi); 
+                    rotTime = rotTime/robot.maxav;
+                    rotTime = ceil(rotTime/dt) - 1;
                     
                     % The slowest composant limit the other
                     timeTrav = max(translTime, rotTime);
@@ -143,8 +211,16 @@ classdef Brain < handle
                     if round(relAngle, 3) ~= 0
                         % Interpolation using Quaternion function
                         rotSteps = ceil(rotTime/dt) - 1;
-                        curPoseQ = UnitQuaternion(curPose.T);
-                        nextPoseQ = UnitQuaternion(nextPose.T);
+                        
+                        % Get the unit quaterion with only the rotation
+                        curPoseQ = curPose.T;
+                        curPoseQ(1:2,3) = 0;
+                        curPoseQ = UnitQuaternion(curPoseQ);
+                        
+                        nextPoseQ = nextPose.T;
+                        nextPoseQ(1:2,3) = 0;
+                        nextPoseQ = UnitQuaternion(nextPoseQ);
+                        
                         resInterpQ = curPoseQ.interp(nextPoseQ, [0:rotSteps]'/rotSteps, 'shortest');
 
                         % Taking z rotation
@@ -166,6 +242,7 @@ classdef Brain < handle
                     end
                     
                     curPose = nextPose;
+                    curOri = nextOri;
                     curP = nextP;
                 end
             end
@@ -175,8 +252,12 @@ classdef Brain < handle
             obj.map.update(obj.robot.hokuyo.hits, obj.robot.hokuyo.voidPoints);
             
             % Transform path into waypoints 
-            [wayPoints(:,1), wayPoints(:,2)] = reducem(obj.path(:,1), obj.path(:,2), 0.01);
-            wayPoints = wayPoints(2:end,:);
+            if reduce
+                [wayPoints(:,1), wayPoints(:,2)] = reducem(obj.path(:,1), obj.path(:,2), 0.01);
+                wayPoints = wayPoints(2:end,:);
+            else
+                wayPoints = obj.path;
+            end
             
             % Get robot cartesian position regardless orientation
             robotInitialPose = obj.robot.se2.T;
@@ -187,7 +268,6 @@ classdef Brain < handle
             
             % Plane the translational trajectory using quintic polynomial and heuristics
             translpath = mstraj(wayPoints, [], obj.dseg, robotInitialPose, obj.dt, obj.at);
-            plot(translpath(:,1), translpath(:,2))
             tseg = numrows(translpath) * obj.dt;
             lispaceTransl = linspace(0, tseg, numrows(translpath));
             tseg = numrows(rotpath) * obj.dt;
@@ -201,11 +281,12 @@ classdef Brain < handle
                 
                 % Time computation
                 timeNew = toc(timeRef);
-                timeDelta = (timeNew - timeOld) + 0.2;
+                timeDelta = (timeNew - timeOld);
                 timeOld = timeNew;
                 
-                curGoal = interp1(lispaceTransl, translpath, timeNew);
-                curRot = interp1(lispaceRot, rotpath, timeNew);
+                timeInterp = timeNew + (timeDelta * 1.5);
+                curGoal = interp1(lispaceTransl, translpath, timeInterp);
+                curRot = interp1(lispaceRot, rotpath, timeInterp);
                 if isnan([curGoal, curRot])
                     obj.controller.setWheelsSpeed(0, 0, 0, 0);
                     break;
@@ -223,10 +304,10 @@ classdef Brain < handle
 
                 % Compute angle to the point to the point and then derive the
                 % angular velocity.             
-                relativeAngle = wrapTo2Pi(curRot) - wrapTo2Pi(obj.robot.se2.angle());
-                angularVelocity = min(abs(relativeAngle/timeDelta), obj.robot.maxav);
+                relativeAngle = wrapToPi(curRot - obj.robot.se2.angle());
+                angularVelocity = min(abs(relativeAngle/timeDelta), obj.robot.maxav * 1.2);
                 angularVelocity = angularVelocity * sign(relativeAngle);
-
+                
                 velocities = [  
                                 velocity * cos(translAngle);
                                 velocity * sin(translAngle);

@@ -52,6 +52,9 @@ classdef Map < handle
         function update(obj, hits, voidPoints)
             % Retrive the smallest coordinate to use it as offset
             % Only minimum here matter.
+            if isempty(hits) || isempty(voidPoints)
+                return
+            end
             minHitX = round(min(hits(:,1)) * obj.resolution) - 1;
             minHitY = round(min(hits(:,2)) * obj.resolution) - 1;
             
@@ -68,7 +71,6 @@ classdef Map < handle
             % Rebuild sparse matrix with offset
             [r, c, v] = find(obj.content);
             if ~isempty([r, c])
-                offsetDiffRow
                 r = r + offsetDiffRow;
                 c = c + offsetDiffCol;
                 obj.content = sparse(double(r), double(c), v);

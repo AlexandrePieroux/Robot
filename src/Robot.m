@@ -65,10 +65,12 @@ classdef Robot < handle
             obj.wheels.init(api, vrep);
             
             % Get the kinematic information of the youbot
-            [res, vector] = api.simxGetObjectPosition(vrep, obj.wheels.frHandle, obj.wheels.flHandle, api.simx_opmode_oneshot_wait); vrchk(api, res);
+            
+            
+            [res, vector] = api.simxGetObjectPosition(vrep, obj.wheels.swFrHandle, obj.wheels.swFlHandle, api.simx_opmode_oneshot_wait); vrchk(api, res);
             obj.a = vector(1)/2; % Distance from center of wheel to the mid width of the robot
             
-            [res, vector] = api.simxGetObjectPosition(vrep, obj.wheels.frHandle, obj.wheels.rrHandle, api.simx_opmode_oneshot_wait); vrchk(api, res);
+            [res, vector] = api.simxGetObjectPosition(vrep, obj.wheels.swFrHandle, obj.wheels.swRrHandle, api.simx_opmode_oneshot_wait); vrchk(api, res);
             obj.b = vector(2)/2; % Distance from center of wheel to the length of the robot
             
             % Compute the jacobian augmented forwad kinematic matrix of the youbot

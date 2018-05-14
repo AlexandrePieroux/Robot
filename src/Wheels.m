@@ -7,6 +7,11 @@ classdef Wheels < handle
     rlHandle;
     frHandle;
     rrHandle;
+    
+    swFlHandle;
+    swRlHandle;
+    swFrHandle;
+    swRrHandle;
   end
   
   methods
@@ -20,9 +25,13 @@ classdef Wheels < handle
         [res, obj.rrHandle] = api.simxGetObjectHandle(vrep, 'rollingJoint_rr', api.simx_opmode_oneshot_wait); vrchk(api, res);
         [res, obj.frHandle] = api.simxGetObjectHandle(vrep, 'rollingJoint_fr', api.simx_opmode_oneshot_wait); vrchk(api, res);
         
+        [res, obj.swFlHandle] = api.simxGetObjectHandle(vrep, 'swedishWheel_fl', api.simx_opmode_oneshot_wait); vrchk(api, res);
+        [res, obj.swRlHandle] = api.simxGetObjectHandle(vrep, 'swedishWheel_rl', api.simx_opmode_oneshot_wait); vrchk(api, res);
+        [res, obj.swFrHandle] = api.simxGetObjectHandle(vrep, 'swedishWheel_fr', api.simx_opmode_oneshot_wait); vrchk(api, res);
+        [res, obj.swRrHandle] = api.simxGetObjectHandle(vrep, 'swedishWheel_rr', api.simx_opmode_oneshot_wait); vrchk(api, res);
+
         % Get the radius of the wheel
-        [res, wheelFrHandle] = api.simxGetObjectHandle(vrep, 'swedishWheel_fr', api.simx_opmode_oneshot_wait); vrchk(api, res);
-        [res, obj.wheelRadius] = api.simxGetObjectFloatParameter(vrep, wheelFrHandle, 20, api.simx_opmode_oneshot_wait); vrchk(api, res);        
+        [res, obj.wheelRadius] = api.simxGetObjectFloatParameter(vrep, obj.swRrHandle, 20, api.simx_opmode_oneshot_wait); vrchk(api, res);        
     end
   end
     

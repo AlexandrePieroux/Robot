@@ -8,6 +8,8 @@ classdef RobotController < handle
         
         xGrid;
         yGrid;
+        
+        a;
     end
     
     methods
@@ -17,6 +19,7 @@ classdef RobotController < handle
         function init(obj, api, vrep, robot, scale)
             obj.robot = robot;
             obj.robot.init(api, vrep);
+            obj.a = (2*pi)/60 * obj.robot.wheels.wheelRadius;
 
             obj.api = api;
             obj.vrep = vrep;
@@ -87,7 +90,7 @@ classdef RobotController < handle
             obj.robot.hokuyo.voidPoints = [xPoly(in), yPoly(in)];
         end
         
-        function setWheelsSpeed(obj, flS, rlS, frS, rrS)
+        function setWheelsSpeed(obj, flS, rlS, frS, rrS)  
             res = obj.api.simxPauseCommunication(obj.vrep, true); vrchk(obj.api, res);
             obj.api.simxSetJointTargetVelocity(obj.vrep, obj.robot.wheels.flHandle, flS, obj.api.simx_opmode_oneshot);
             obj.api.simxSetJointTargetVelocity(obj.vrep, obj.robot.wheels.rlHandle, rlS, obj.api.simx_opmode_oneshot);
