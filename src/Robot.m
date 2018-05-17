@@ -164,7 +164,6 @@ classdef Robot < handle
 
                 rotTime = pi - abs(abs(curOri - nextOri) - pi); 
                 rotTime = rotTime/obj.maxav;
-                rotTime = ceil(rotTime/dt) - 1;
 
                 % The slowest composant limit the other
                 timeTrav = max(translTime, rotTime);
@@ -173,7 +172,7 @@ classdef Robot < handle
                 % Orientation interpolation if needed
                 relAngle = tr2rpy(relativePose);
                 relAngle = relAngle(3);
-                if round(relAngle, 3) ~= 0
+                if round(relAngle, 1) ~= 0
                     % Interpolation using Quaternion function
                     rotSteps = ceil(rotTime/dt) - 1;
 

@@ -37,19 +37,19 @@ classdef RobotController < handle
         
         function updateData(obj)
             % Robot center, relative to the absolute frame
-            [res, arcPos] = obj.api.simxGetObjectPosition(obj.vrep, obj.robot.handle, -1, obj.api.simx_opmode_blocking); vrchk(obj.api, res, true);
-            [res, arcOri] = obj.api.simxGetObjectOrientation(obj.vrep, obj.robot.handle, -1, obj.api.simx_opmode_blocking); vrchk(obj.api, res, true);
-
+            [res, arcPos] = obj.api.simxGetObjectPosition(obj.vrep, obj.robot.handle, -1, obj.api.simx_opmode_oneshot_wait); vrchk(obj.api, res, true);
+            [res, arcOri] = obj.api.simxGetObjectOrientation(obj.vrep, obj.robot.handle, -1, obj.api.simx_opmode_oneshot_wait); vrchk(obj.api, res, true);
+            
             % Hokuyo1, relative to the robot center frame
-            [res, rh1Pos] = obj.api.simxGetObjectPosition(obj.vrep, obj.robot.hokuyo.firstHandle, obj.robot.handle, obj.api.simx_opmode_blocking); vrchk(obj.api, res, true);
-            [res, rh1Ori] = obj.api.simxGetObjectOrientation(obj.vrep, obj.robot.hokuyo.firstHandle, obj.robot.handle, obj.api.simx_opmode_blocking); vrchk(obj.api, res, true);
-
+            [res, rh1Pos] = obj.api.simxGetObjectPosition(obj.vrep, obj.robot.hokuyo.firstHandle, obj.robot.handle, obj.api.simx_opmode_oneshot_wait); vrchk(obj.api, res, true);
+            [res, rh1Ori] = obj.api.simxGetObjectOrientation(obj.vrep, obj.robot.hokuyo.firstHandle, obj.robot.handle, obj.api.simx_opmode_oneshot_wait); vrchk(obj.api, res, true);
+            
             % Hokuyo2, relative to the robot center frame
-            [res, rh2Pos] = obj.api.simxGetObjectPosition(obj.vrep, obj.robot.hokuyo.secondHandle, obj.robot.handle, obj.api.simx_opmode_blocking); vrchk(obj.api, res, true);
-            [res, rh2Ori] = obj.api.simxGetObjectOrientation(obj.vrep, obj.robot.hokuyo.secondHandle, obj.robot.handle, obj.api.simx_opmode_blocking); vrchk(obj.api, res, true);
+            [res, rh2Pos] = obj.api.simxGetObjectPosition(obj.vrep, obj.robot.hokuyo.secondHandle, obj.robot.handle, obj.api.simx_opmode_oneshot_wait); vrchk(obj.api, res, true);
+            [res, rh2Ori] = obj.api.simxGetObjectOrientation(obj.vrep, obj.robot.hokuyo.secondHandle, obj.robot.handle, obj.api.simx_opmode_oneshot_wait); vrchk(obj.api, res, true);
 
-            [res1, ~, auxData1, auxPacketInfo1] = obj.api.simxReadVisionSensor(obj.vrep, obj.robot.hokuyo.firstHandle, obj.api.simx_opmode_blocking); vrchk(obj.api, res1, true);
-            [res2, ~, auxData2, auxPacketInfo2] = obj.api.simxReadVisionSensor(obj.vrep, obj.robot.hokuyo.secondHandle, obj.api.simx_opmode_blocking); vrchk(obj.api, res2, true);
+            [res1, ~, auxData1, auxPacketInfo1] = obj.api.simxReadVisionSensor(obj.vrep, obj.robot.hokuyo.firstHandle, obj.api.simx_opmode_oneshot_wait); vrchk(obj.api, res1, true);
+            [res2, ~, auxData2, auxPacketInfo2] = obj.api.simxReadVisionSensor(obj.vrep, obj.robot.hokuyo.secondHandle, obj.api.simx_opmode_oneshot_wait); vrchk(obj.api, res2, true);
             
             % Robot SE(2) relative to the absolute frame. We apply a
             % rotation of -pi/2 about the z axis in order to have the body
@@ -62,7 +62,7 @@ classdef RobotController < handle
             obj.robot.pose = SE3(rotx(arcOri(1)) * roty(arcOri(2)) * rotz(arcOri(3)), arcPos');
             obj.robot.hokuyo.firstPose = obj.robot.pose * SE3(rotx(rh1Ori(1)) * roty(rh1Ori(2)) * rotz(rh1Ori(3)), rh1Pos');
             obj.robot.hokuyo.secondPose = obj.robot.pose * SE3(rotx(rh2Ori(1)) * roty(rh2Ori(2)) * rotz(rh2Ori(3)), rh2Pos');
-                   
+            
             width = auxData1(auxPacketInfo1(1) + 1);
             height = auxData1(auxPacketInfo1(1) + 2);
             h1points = reshape(auxData1((auxPacketInfo1(1) + 2 + 1):end), 4, width*height);
@@ -77,7 +77,7 @@ classdef RobotController < handle
 
             % Hit points
             obj.robot.hokuyo.hits = [h1points(1:2,h1hits) h2points(1:2,h2hits)]';
-            
+    
             % Void points
             [rx, ry, ~] = transl(obj.robot.pose);
             [h1x, h1y, ~] = transl(obj.robot.hokuyo.firstPose);

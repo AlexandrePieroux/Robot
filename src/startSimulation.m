@@ -23,13 +23,13 @@ function startSimulation()
 
   disp('Setting up the robot informations');
   % Range, max x velocity, max y velocity and max angular velocity
-  robot = Robot(5, 0.1, 0.1, 0.15);  
+  robot = Robot(5, 0.07, 0.07, 0.1);  
   
   disp('Creating a brain');
   brain = Brain(vrep);
   
   disp('Brain initialization');
-  brain.init(api, vrep, robot, 0.10, 5);
+  brain.init(api, vrep, robot, 0.08, 4);
   
   disp('Fly little bird, fly');
   brain.work();

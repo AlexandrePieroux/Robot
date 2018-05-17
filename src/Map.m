@@ -50,11 +50,12 @@ classdef Map < handle
         end
         
         function update(obj, hits, voidPoints)
-            % Retrive the smallest coordinate to use it as offset
-            % Only minimum here matter.
             if isempty(hits) || isempty(voidPoints)
                 return
             end
+            
+            % Retrive the smallest coordinate to use it as offset
+            % Only minimum here matter.
             minHitX = round(min(hits(:,1)) * obj.resolution) - 1;
             minHitY = round(min(hits(:,2)) * obj.resolution) - 1;
             
@@ -119,6 +120,7 @@ classdef Map < handle
         
         function print(obj)
             figure(2);
+            clf(2);
             colormap('hot');
             imagesc(obj.content);
             caxis([-10,10]);

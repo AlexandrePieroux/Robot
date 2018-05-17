@@ -38,7 +38,7 @@ classdef Brain < handle
                         
             %Initialize the controller
             obj.controller.init(api, vrep, robot, scale);
-            obj.inflateRay = sqrt(obj.robot.length^2 + obj.robot.width^2)/2 * 2.2;
+            obj.inflateRay = sqrt(obj.robot.length^2 + obj.robot.width^2)/2 * 1.5;
             
             %Initialize the map
             obj.map = Map(scale);
@@ -48,13 +48,16 @@ classdef Brain < handle
             %Do a barrel roll
             %%%%%%%%%% DEBUG %%%%%%%%%%%%%
             obj.barrelRoll();
+            %robotMap = obj.map;
+            %save('map.mat', 'robotMap');
+            
         end
         
         function work(obj)
             
             %%%%%%%%%% DEBUG %%%%%%%%%%%%%
             %load('map.mat');
-            %obj.map = mapSave;
+            %obj.map = robotMap;
             
             obj.explore();
             %obj.dispatch();
@@ -66,6 +69,10 @@ classdef Brain < handle
         end
         
         function discoverMap(obj)
+            % Update data
+            obj.updateData();
+            obj.map.update(obj.robot.hokuyo.hits, obj.robot.hokuyo.voidPoints);
+            
             while(obj.setNextExplorationTrajectory())
                 obj.drive(true);
             end
@@ -128,11 +135,7 @@ classdef Brain < handle
         end
         
         function drive(obj, reduce)
-            % Update data
-            obj.updateData();
-            obj.map.update(obj.robot.hokuyo.hits, obj.robot.hokuyo.voidPoints);
-            
-            % Transform path into waypoints 
+            % Transform path into waypoints if asked
             if reduce
                 [wayPoints(:,1), wayPoints(:,2)] = reducem(obj.path(:,1), obj.path(:,2), 0.01);
                 wayPoints = wayPoints(2:end,:);
@@ -156,6 +159,7 @@ classdef Brain < handle
             
             timeRef = tic;
             timeOld = 0;
+            wheelsSpeed = [0, 0, 0, 0];
             while(true) % While we have points to go
                 obj.controller.updateData();
                 obj.map.update(obj.robot.hokuyo.hits, obj.robot.hokuyo.voidPoints);
@@ -164,12 +168,13 @@ classdef Brain < handle
                 timeNew = toc(timeRef);
                 timeDelta = (timeNew - timeOld);
                 timeOld = timeNew;
-                
+
                 timeInterp = timeNew + (timeDelta * 1.5);
                 curGoal = interp1(lispaceTransl, translpath, timeInterp);
                 curRot = interp1(lispaceRot, rotpath, timeInterp);
-                if isnan([curGoal, curRot])
-                    obj.controller.setWheelsSpeed(0, 0, 0, 0);
+                if isnan(curGoal)
+                    wheelsSpeed = wheelsSpeed * 0.3;
+                    obj.controller.setWheelsSpeed(wheelsSpeed(4), wheelsSpeed(1), wheelsSpeed(3), wheelsSpeed(2));
                     break;
                 end
                     
@@ -270,9 +275,13 @@ classdef Brain < handle
 %}
         
         function ret = setNextExplorationTrajectory(obj)
-            ds = Dstar(double(full(obj.map.content) >= obj.classTreshold), 'inflate', double(round(obj.inflateRay)), 'progress');
+            obj.map.print();
+            mapToProcess = double(full(obj.map.content) >= obj.classTreshold);
             [x, y, ~] = transl(obj.robot.pose);
+            
             [rposR, rposC] = obj.map.world2Map(x, y);
+            
+            ds = Dstar(mapToProcess, 'inflate', double(round(obj.inflateRay)));
             ds.plan([abs(rposC), abs(rposR)]);
             
             distanceMap = ds.h;
@@ -280,7 +289,6 @@ classdef Brain < handle
             
             [v, i] = min(distanceMap(:));
             [row, col] = ind2sub(size(distanceMap), i);
-            %[goalX, goalY] = obj.map.map2World(row, col);
             
             if v == Inf 
                 obj.path = [];
@@ -289,15 +297,15 @@ classdef Brain < handle
                 obj.path = ds.query([col, row]);
                 
                 % Plot path on map representation
-                obj.map.print();
-                hold on;
-                plot(obj.path(:,1), obj.path(:,2), 'g')
+                %obj.map.print();
+                %hold on;
+                %plot(obj.path(:,1), obj.path(:,2), 'g')
                 
                 % Inverting the path since we plan from the robot pose
                 [obj.path(:,1), obj.path(:,2)] = obj.map.map2World(flipud(obj.path(:,2)), flipud(obj.path(:,1)));
                 
                 % Don't let it bump into obstacle it does not know
-                newEnd = round(size(obj.path, 1) * 0.2);
+                newEnd = round(size(obj.path, 1) * 0.4);
                 obj.path = obj.path(1:newEnd,:);
                 ret = true;
             end
