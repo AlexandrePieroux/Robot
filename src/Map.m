@@ -92,20 +92,44 @@ classdef Map < handle
             % Insert hokuyo data in the map
             for n = 1:size(mapHits, 1)
                 if mapHits(n,1) > size(obj.content, 1) || mapHits(n,2) > size(obj.content, 2)
-                    obj.content(mapHits(n,1), mapHits(n,2)) = 1;
+                    obj.content(mapHits(n,1), mapHits(n,2)) = 2;
                 else
-                    obj.content(mapHits(n,1), mapHits(n,2)) = obj.content(mapHits(n,1), mapHits(n,2)) + 1;
+                    obj.content(mapHits(n,1), mapHits(n,2)) = obj.content(mapHits(n,1), mapHits(n,2)) + 2;
                 end
             end
             
             % Insert voids data in the map
             for n = 1:size(mapVoids, 1)
                 if mapVoids(n,1) > size(obj.content, 1) || mapVoids(n,2) > size(obj.content, 2)
-                    obj.content(mapVoids(n,1), mapVoids(n,2)) = 1;
+                    obj.content(mapVoids(n,1), mapVoids(n,2)) = -1;
                 else
                     obj.content(mapVoids(n,1), mapVoids(n,2)) = obj.content(mapVoids(n,1), mapVoids(n,2)) - 1;
                 end
             end
+        end
+        
+        function dilatedMap = inflate(obj, threshold, radius, robotCoord)
+            
+            % Inflate the map obstacles
+            mapToProcess = double(obj.content >= threshold);
+            dilatedMap = imdilate(full(mapToProcess), strel('disk', radius));
+            
+            % Dilate the robot position
+            radius = round(radius * 0.75);
+            robotInflateShape = strel('disk', radius);
+            
+            [row, col] = size(robotInflateShape.Neighborhood);
+            subRow = round((row - 1)/2);
+            subCol = round((col - 1)/2);
+            
+            coordMin = robotCoord - [subRow, subCol];
+            coordMax = robotCoord + [row - subRow - 1, col - subCol - 1];
+            
+            % Carve the inflated robot position to avoid the robot to be
+            % 'ate' by the obstacle inflate.
+            robotZone = dilatedMap(coordMin(1):coordMax(1), coordMin(2):coordMax(2));
+            robotZone(robotInflateShape.Neighborhood) = 0;
+            dilatedMap(coordMin(1):coordMax(1), coordMin(2):coordMax(2)) = robotZone;
         end
         
         function [x, y] = map2World(obj, row, col)
