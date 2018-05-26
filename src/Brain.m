@@ -8,6 +8,7 @@ classdef Brain < handle
         robot;
         controller;
         map;
+        matcher;
         
         % Map threshold
         classTreshold;
@@ -17,8 +18,7 @@ classdef Brain < handle
         dimExpander;
         inflateRay;
         
-        % Path interpolation data
-        dseg = [];         % Duration per each segment
+        % Path interpolation parameter
         dt = 0.2;          % Sample interval
         at = 0.8;          % Acceleration time
         
@@ -44,32 +44,38 @@ classdef Brain < handle
             obj.map = Map(scale);
             obj.map.insertRobot(robot);
             obj.inflateRay = obj.inflateRay * obj.map.resolution;
+            
+            % Initialise the pictures classifier
+            pictures = {'pictures/dog.png', ...
+                        'pictures/plant.png', ...
+                        'pictures/pumpkin.png', ...
+                        'pictures/trashcan.png', ...
+                        'pictures/trike.png'};      
+            obj.matcher = Matcher(pictures);
         end
         
         function work(obj)
+            %%%%%%%%%% DEBUG %%%%%%%%%%%%%
+            load('map.mat');
+            obj.map = robotMap;
             
             % Do a barrel roll
-            obj.barrelRoll();
+            %obj.barrelRoll();
             
-            % Start exploration
-            obj.explore();
+            % Discover the ground map
+            %obj.discoverMap();
             
             %%%%%%%%%% DEBUG %%%%%%%%%%%%%
             %robotMap = obj.map;
             %save('map.mat', 'robotMap');
             
-            %%%%%%%%%% DEBUG %%%%%%%%%%%%%
-            %load('map.mat');
-            %obj.map = robotMap;
-            
-            %obj.dispatch();
+            % Seek for bins
+            obj.discoverBins();            
         end
-        
-        function explore(obj)
-            obj.discoverMap();
-            %obj.discoverBins();
-        end
-        
+    end
+    
+    
+    methods (Access='protected')
         function discoverMap(obj)
             % Update data
             obj.controller.updateData();
@@ -80,54 +86,16 @@ classdef Brain < handle
             end
         end
         
-        function dispatch(obj)
-            %TODO
-        end
-        
         function barrelRoll(obj)  
-            % Plane the trajectory
-            rotpath = obj.robot.rotate2Pi(obj.dt);
+            % Plan a barell roll
+            curOri = obj.robot.se2.T;
+            ori(:,:,1) = curOri * rotz(pi/2);
+            ori(:,:,2) = curOri * rotz(pi);
+            ori(:,:,3) = curOri * rotz(3*pi/2);
+            ori(:,:,4) = curOri * rotz(2*pi);
             
-            % Plane the rotation
-            tseg = numrows(rotpath) * obj.dt;
-            lispaceRot = linspace(0, tseg, numrows(rotpath));
-            
-            timeRef = tic;
-            timeOld = 0;
-            while(true) % While we have points to go
-                obj.controller.updateData();
-                obj.map.update(obj.robot.hokuyo.hits, obj.robot.hokuyo.voidPoints);
-
-                % Time computation
-                timeNew = toc(timeRef);
-                timeDelta = (timeNew - timeOld);
-                timeOld = timeNew;
-
-                timeInterp = timeNew + (timeDelta * 1.5);
-                curRot = interp1(lispaceRot, rotpath, timeInterp);
-                if isnan(curRot)
-                    obj.controller.setWheelsSpeed(0, 0, 0, 0);
-                    break;
-                end
-
-                % Compute angle to the point to the point and then derive the
-                % angular velocity.       
-                relativeAngle = wrapToPi(curRot - obj.robot.se2.angle());
-                angularVelocity = min(abs(relativeAngle/timeDelta), obj.robot.maxav * 1.2);
-                angularVelocity = angularVelocity * sign(relativeAngle);
-
-                velocities = [  
-                                0;
-                                0;
-                                angularVelocity;
-                                0;
-                             ];
-
-                % Use the augmented jacobian matrice of the kinematic to
-                % get wheel speed.
-                wheelsSpeed = obj.robot.Ja * velocities;
-                obj.controller.setWheelsSpeed(wheelsSpeed(4), wheelsSpeed(1), wheelsSpeed(3), wheelsSpeed(2));
-            end
+            % Perform the poses
+            obj.controller.drivePose(obj.map, ori, obj.dt);
         end
         
         function drive(obj, reduce)
@@ -139,134 +107,69 @@ classdef Brain < handle
                 wayPoints = obj.path;
             end
             
-            % Get robot cartesian position regardless orientation
-            robotInitialPose = obj.robot.se2.T;
-            robotInitialPose = [robotInitialPose(1,3) robotInitialPose(2,3)];
-            
-            % Plane the trajectory
-            [rotpath, obj.dseg] = obj.robot.getHeadings(wayPoints, obj.dt);
-            
-            % Plane the translational trajectory using quintic polynomial and heuristics
-            translpath = mstraj(wayPoints, [], obj.dseg, robotInitialPose, obj.dt, obj.at);
-            tseg = numrows(translpath) * obj.dt;
-            lispaceTransl = linspace(0, tseg, numrows(translpath));
-            tseg = numrows(rotpath) * obj.dt;
-            lispaceRot = linspace(0, tseg, numrows(rotpath));
-            
-            timeRef = tic;
-            timeOld = 0;
-            while(true) % While we have points to go
-                obj.controller.updateData();
-                obj.map.update(obj.robot.hokuyo.hits, obj.robot.hokuyo.voidPoints);
-                
-                % Time computation
-                timeNew = toc(timeRef);
-                timeDelta = (timeNew - timeOld);
-                timeOld = timeNew;
-
-                timeInterp = timeNew + (timeDelta * 1.5);
-                curGoal = interp1(lispaceTransl, translpath, timeInterp);
-                curRot = interp1(lispaceRot, rotpath, timeInterp);
-                if isnan(curGoal)
-                    obj.controller.setWheelsSpeed(0, 0, 0, 0);
-                    break;
-                end
-                    
-                % Compute the point relative to the robot pose
-                goalToRobot = homtrans(obj.robot.se2Inv.T, curGoal');
-
-                % Compute the distance to the point and then derive the
-                % velocity.
-                distance = sqrt(goalToRobot(1)^2 + goalToRobot(2)^2);
-                translAngle = atan2(goalToRobot(2), goalToRobot(1));
-                velocity = min(abs(distance/timeDelta), sqrt(obj.robot.maxv(1)^2 + obj.robot.maxv(2)^2));
-                velocity = velocity * sign(distance);
-
-                % Compute angle to the point to the point and then derive the
-                % angular velocity.             
-                relativeAngle = wrapToPi(curRot - obj.robot.se2.angle());
-                angularVelocity = min(abs(relativeAngle/timeDelta), obj.robot.maxav * 1.2);
-                angularVelocity = angularVelocity * sign(relativeAngle);
-                
-                velocities = [  
-                                velocity * cos(translAngle);
-                                velocity * sin(translAngle);
-                                angularVelocity;
-                                0;
-                             ];
-
-                % Use the augmented jacobian matrice of the kinematic to
-                % get wheel speed.
-                wheelsSpeed = obj.robot.Ja * velocities;
-                obj.controller.setWheelsSpeed(wheelsSpeed(4), wheelsSpeed(1), wheelsSpeed(3), wheelsSpeed(2));                
-            end
+            % Perform the path
+            obj.controller.drivePath(obj.map, wayPoints, obj.dt, obj.at)
         end
         
-%{
+
         function discoverBins(obj)
-            % Initialise the list of pictures to load
-            pictures = {'pictures/dog.png', ...
-                      'pictures/plant.png', ...
-                      'pictures/pumpkin.png', ...
-                      'pictures/trashcan.png', ...
-                      'pictures/trike'};
-                  
-            % Corner threshold test
-            cornerThreshold = 50;
+            % Find bins
+            mp = full(obj.map.content >= 4);
+            dilatedMap = imdilate(mp, strel('disk', 5));
+            erodeMap = imerode(dilatedMap, strel('disk', 5));
+            circles = imfindcircles(erodeMap,[7 40], 'Sensitivity', 0.88,'EdgeThreshold',0.08);
+            circles = round(circles);
             
-            %Load the matcher
-            matcher = Matcher(pictures, cornerThreshold);
-            corners = matcher.cornerDetection(obj.map.content);
-
-            ds = Dstar(uint16(obj.map.content >= obj.classTreshold), {'inflate', obj.inflateRay});
-            while(not(length(sizeTrajectory) == 2 & size(corners == [0 0])))
-                obj.controller.objective = [0, corners(1,:)];
-
-            binaryMap = obj.map.content >= obj.classTreshold;
-
-            ds = Dstar(uint16(binaryMap));
-            while(not(size(corners == [0 0])))
-                point = round(corners(1,:));
-                validPoint = getValidPoint(binaryMap, zeros(size(binaryMap)), point);
-                ds.plan(validPoint);
-                pathPos = generateWheelsTrajectory(ds, validPoint, false, );
-              
-                obj.wheelsTrajectory = pathPos;
-                obj.drive();
-
-                % Take picture
-                % TODO
-                imageHits = matcher.imageMatch(file);
-                
-                % Check if the image is good or not
-                % TODO
-                
-                corners = corners(2:end, :);
-            end 
-        end
-        
-
-        function validPoint = getValidPoint(obj, binaryMap, memory, stack)
-            point = stack(1, :);
-            stack = stack(2:end,:);
+            % Invert coordinate to match row col format
+            circles = [circles(:,2), circles(:,1)];
             
-            if memory(point(1), point(2)) == 0
-                memory(point(1), point(2)) = 1;
-                if binaryMap(stack(1,1), point(1,2)) == 0
-                    validPoint = point;
-                else
-                    stack = [stack; ...
-                        [point(1)-1, point(2)];...
-                        [point(1)+1, point(2)];...
-                        [point(1), point(2)-1];...
-                        [point(1), point(2)+1]];
-                    validPoint = getValidPoint(binaryMap, memory, stack);
+            % Number of points to place on the map
+            numberPoints = 1000;
+            
+            % Compute the random tree navigation structure
+            [x, y, ~] = transl(obj.robot.pose);
+            [rposR, rposC] = obj.map.world2Map(x, y);
+            inflatedMap = obj.map.inflate(obj.classTreshold, double(round(obj.inflateRay)), [rposR, rposC]);
+            prm = PRM(inflatedMap, 'npoints', numberPoints);
+            prm.plan();
+            
+            threshold = round(obj.inflateRay) * 30;
+            
+            % For each circle shape detected on the map
+            for n = 1:numrows(circles)
+                % Get shortest path
+                [x, y, ~] = transl(obj.robot.pose);
+                [rposR, rposC] = obj.map.world2Map(x, y);
+                [idx, obj.path] = obj.spf2circle(prm, [rposC, rposR], circles, threshold);
+                circle = circles(idx,:);
+
+                % Drive to the closest detected circle
+                [obj.path(:,1), obj.path(:,2)] = obj.map.map2World(obj.path(:,2), obj.path(:,1));
+                obj.drive(true);
+
+                % Plan the poses to face the center of the circle
+                [x, y, ~] = transl(obj.robot.pose);
+                [rposR, rposC] = obj.map.world2Map(x, y);
+                
+                ori = obj.robot.se2.T;
+                robotAngle = tr2rpy(ori);
+                robotAngle = robotAngle(3);
+                                
+                circleAngle = atan2(circle(1) - rposR, circle(2) - rposC);
+                angle = circleAngle - robotAngle;
+                
+                if angle >= 0.1
+                    ori = ori * rotz(angle);
+                    obj.controller.drivePose(obj.map, ori, obj.dt);
                 end
-            else
-                validPoint = getValidPoint(binaryMap, memory, stack);
+
+                % Take a picture and match it against the pictures
+                image = obj.controller.takePicture(); 
+                obj.matcher.imageMatch(image);
+               
+                circles(idx,:) = []; 
             end
         end
-%}
         
         function ret = setNextExplorationTrajectory(obj)
             obj.controller.updateData();
@@ -299,6 +202,40 @@ classdef Brain < handle
                 newEnd = round(size(obj.path, 1) * 0.7);
                 obj.path = obj.path(1:newEnd,:);
                 ret = true;
+            end
+        end
+        
+        function pathCost = getPathCost(obj, path)
+            pathCost = 0;
+            p1 = path(1,:);
+
+            for o = 2:numrows(path)
+                p2 = path(o,:);
+                pathCost = pathCost + pdist2(p1, p2, 'euclidean');
+                p1 = p2;
+            end
+        end
+        
+        function [idx, pathToCircle] = spf2circle(obj, prm, start, circles, threshold)
+            distancePath = Inf;
+            idx = 1;
+            for m = 1:numrows(circles)
+                % Get the closest matching point of the tree (avoid to be
+                % in obstacles)
+                circle = circles(m,:);
+                [~, v] = prm.graph.distances([circle(2), circle(1)]);
+                v = v(v > threshold);
+                goal = prm.graph.coord(v(1));
+
+                % Plan the path to the circle coordinates
+                newPathToCircle = prm.query([start(1), start(2)], goal');
+                newDistancePath = obj.getPathCost(newPathToCircle);
+
+                if newDistancePath < distancePath
+                    distancePath = newDistancePath;
+                    pathToCircle = newPathToCircle;
+                    idx = m;
+                end
             end
         end
     end

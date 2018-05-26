@@ -1,72 +1,77 @@
 classdef Matcher < handle
+    
   properties
     imgList
     imgDesc
-    cornerThreshold
+    
+    classifier
   end
+  
   methods
-      function obj = Matcher(imgList, cornerThreshold)
-          obj.cornerThreshold = cornerThreshold;
+      function obj = Matcher(imgList)
           obj.imgList = imgList;          
           obj.imgDesc = {};
+          
+          imds = imageDatastore(imgList,'Labels', imgList);
+          bag = bagOfFeatures(imds);
+          obj.classifier = trainImageCategoryClassifier(imds, bag);
+          %{
           for i=1:length(imgList)
-              img = readGray(obj, imgList{i});
+              img = imread(imgList{i});
+              img = readGray(obj, img);
               points = detectSURFFeatures(img);
-              [obj.imgDesc{i}, ~] = extractFeatures(img, points);
+              [featureDesc, validPoints] = extractFeatures(img, points);
+              obj.imgDesc{i} = {img, featureDesc, validPoints};
           end
+          %}
       end
       
       function matches = imageMatch(obj, image)
-          img = readGray(obj, image);
+          %img = readGray(obj, image);
+          
+          predict(obj.classifier, image);
+          %{
           points = detectSURFFeatures(img);
-          [desc, ~] = extractFeatures(img, points);
+          [desc, validPoints] = extractFeatures(img, points);
  
+          matches = zeros(length(obj.imgList), 1);
           for i=1:length(obj.imgList)
-              [nbDesc, ~] = size(obj.imgDesc{i});
-              matches(i) = match(obj, desc, obj.imgDesc{i}) / nbDesc;
+              original = obj.imgDesc{i}{1};
+              pDesc = obj.imgDesc{i}{2};
+              pValidPoints = obj.imgDesc{i}{3};
+              indexPairs = matchFeatures(pDesc, desc);
+              
+              matchedOriginal  = pValidPoints(indexPairs(:,1));
+              matchedDistorted = validPoints(indexPairs(:,2));
+              
+              [tform, inlierDistorted, inlierOriginal, status] = estimateGeometricTransform(...
+                matchedDistorted,...
+                matchedOriginal,...
+                'similarity'...
+              );
+              
+              if status == 0
+                  outputView = imref2d(size(original));
+                  recovered  = imwarp(img, tform, 'OutputView', outputView);
+                  figure, imshowpair(original,recovered,'montage');
+                  
+                  z = imabsdiff(original, recovered);
+                  figure, imshow(z);
+              else
+                  disp('Error:')
+                  status
+              end
           end
-      end
-      
-      function num = match(obj, des1, des2)
-        distRatio = 0.6;   
-
-        % For each descriptor in the first image, select its match to second image.
-        des2t = des2';                          % Precompute matrix transpose
-        for i = 1 : size(des1,1)
-            dotprods = des1(i,:) * des2t;        % Computes vector of dot products
-            [vals,indx] = sort(acos(dotprods));  % Take inverse cosine and sort results
-
-            % Check if nearest neighbor has angle less than distRatio times 2nd.
-            if (vals(1) < distRatio * vals(2))
-                match(i) = indx(1);
-            else
-                match(i) = 0;
-            end
-        end
-        num = sum(match > 0);
+          %}
       end
       
       function grayImg = readGray(obj, img)
-          grayImg = imread(img);
-          if ndims(grayImg) == 3
-                grayImg = rgb2gray(grayImg);
+          if ndims(img) == 3
+              grayImg = rgb2gray(img);
+          else
+              grayImg = img;
           end
       end
       
-      function validCorners = cornerDetection(obj, map)
-          corners = detectHarrisFeatures(map);
-          [~, corners] = extractFeatures(map, corners);
-          corners = corners.Location;
-          
-          % Agregate the corners based on the Euclidian distance, according to a threshold
-          for i = 1 : size(corners, 1)
-              distances = pdist2(corners, corners(i,:));
-              indexes = find(distances < obj.cornerThreshold);
-              validCorners(i,:) = mean(corners(indexes,:), 1);
-              corners(indexes,:) = 0;
-          end
-          validCorners(all(validCorners == 0,2),:) = [];
-          
-      end
   end
 end

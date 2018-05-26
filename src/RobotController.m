@@ -90,6 +90,236 @@ classdef RobotController < handle
             obj.robot.hokuyo.voidPoints = [xPoly(in), yPoly(in)];
         end
         
+        function image = takePicture(obj)
+            obj.api.simxSetIntegerSignal(obj.vrep, 'handle_rgb_sensor', 1, obj.api.simx_opmode_oneshot_wait);
+            [res, resolution, image] = obj.api.simxGetVisionSensorImage2(obj.vrep, obj.robot.rgbsensor.handle, 0, obj.api.simx_opmode_oneshot_wait); vrchk(obj.api, res);
+        end
+        
+        function drivePose(obj, map, poses, dt)
+            % Plane the trajectory
+            rotpath = obj.interp2z(poses, dt);
+            
+            % Plane the rotation
+            tseg = numrows(rotpath) * dt;
+            lispaceRot = linspace(0, tseg, numrows(rotpath));
+            
+            timeRef = tic;
+            timeOld = 0;
+            while(true) % While we have points to go
+                obj.updateData();
+                map.update(obj.robot.hokuyo.hits, obj.robot.hokuyo.voidPoints);
+
+                % Time computation
+                timeNew = toc(timeRef);
+                timeDelta = (timeNew - timeOld);
+                timeOld = timeNew;
+
+                timeInterp = timeNew + (timeDelta * 1.5);
+                curRot = interp1(lispaceRot, rotpath, timeInterp);
+                if isnan(curRot)
+                    obj.setWheelsSpeed(0, 0, 0, 0);
+                    break;
+                end
+
+                % Compute angle to the point to the point and then derive the
+                % angular velocity.       
+                relativeAngle = wrapToPi(curRot - obj.robot.se2.angle());
+                angularVelocity = min(abs(relativeAngle/timeDelta), obj.robot.maxav * 1.2);
+                angularVelocity = angularVelocity * sign(relativeAngle);
+
+                velocities = [  
+                                0;
+                                0;
+                                angularVelocity;
+                                0;
+                             ];
+
+                % Use the augmented jacobian matrice of the kinematic to
+                % get wheel speed.
+                wheelsSpeed = obj.robot.Ja * velocities;
+                obj.setWheelsSpeed(wheelsSpeed(4), wheelsSpeed(1), wheelsSpeed(3), wheelsSpeed(2));
+            end
+        end
+        
+        function drivePath(obj, map, path, dt, at)            
+            % Get robot cartesian position regardless orientation
+            robotInitialPose = obj.robot.se2.T;
+            robotInitialPose = [robotInitialPose(1,3) robotInitialPose(2,3)];
+            
+            % Plane the trajectory
+            [rotpath, dseg] = obj.interp2zWithT(path, dt);
+            
+            % Plane the translational trajectory using quintic polynomial and heuristics
+            translpath = mstraj(path, [], dseg, robotInitialPose, dt, at);
+            tseg = numrows(translpath) * dt;
+            lispaceTransl = linspace(0, tseg, numrows(translpath));
+            tseg = numrows(rotpath) * dt;
+            lispaceRot = linspace(0, tseg, numrows(rotpath));
+            
+            timeRef = tic;
+            timeOld = 0;
+            while(true) % While we have points to go
+                obj.updateData();
+                map.update(obj.robot.hokuyo.hits, obj.robot.hokuyo.voidPoints);
+                
+                % Time computation
+                timeNew = toc(timeRef);
+                timeDelta = (timeNew - timeOld);
+                timeOld = timeNew;
+
+                timeInterp = timeNew + (timeDelta * 1.5);
+                curGoal = interp1(lispaceTransl, translpath, timeInterp);
+                curRot = interp1(lispaceRot, rotpath, timeInterp);
+                if isnan(curGoal)
+                    obj.setWheelsSpeed(0, 0, 0, 0);
+                    break;
+                end
+                    
+                % Compute the point relative to the robot pose
+                goalToRobot = homtrans(obj.robot.se2Inv.T, curGoal');
+
+                % Compute the distance to the point and then derive the
+                % velocity.
+                distance = sqrt(goalToRobot(1)^2 + goalToRobot(2)^2);
+                translAngle = atan2(goalToRobot(2), goalToRobot(1));
+                velocity = min(abs(distance/timeDelta), sqrt(obj.robot.maxv(1)^2 + obj.robot.maxv(2)^2));
+                velocity = velocity * sign(distance);
+
+                % Compute angle to the point to the point and then derive the
+                % angular velocity.             
+                relativeAngle = wrapToPi(curRot - obj.robot.se2.angle());
+                angularVelocity = min(abs(relativeAngle/timeDelta), obj.robot.maxav * 1.2);
+                angularVelocity = angularVelocity * sign(relativeAngle);
+                
+                velocities = [  
+                                velocity * cos(translAngle);
+                                velocity * sin(translAngle);
+                                angularVelocity;
+                                0;
+                             ];
+
+                % Use the augmented jacobian matrice of the kinematic to
+                % get wheel speed.
+                wheelsSpeed = obj.robot.Ja * velocities;
+                obj.setWheelsSpeed(wheelsSpeed(4), wheelsSpeed(1), wheelsSpeed(3), wheelsSpeed(2));                
+            end
+        end
+    end
+    
+    
+    methods (Access='protected')
+        
+        function angles = interp2z(obj, se2Poses, dt)
+            % Get robot pose and pi rotation pose
+            curOri = obj.robot.se2.T;
+            curAngle = tr2rpy(curOri);
+            curAngle = curAngle(3);
+            angles = [];
+            
+            for n=1:size(se2Poses, 3)
+                nextOri = se2Poses(:,:,n);
+                nextAngle = tr2rpy(nextOri);
+                nextAngle = nextAngle(3);
+
+                nextOri(1:2,3) = 0;
+                curOri(1:2,3) = 0;
+
+                % Compute the time needed according to robot specs
+                rotTime = pi - abs(abs(curAngle - nextAngle) - pi); 
+                rotTime = rotTime/obj.robot.maxav;
+                rotTime = ceil(rotTime/dt) - 1;
+
+                % Interpolation using unit quaternion
+                robotOriQ = UnitQuaternion(curOri);
+                nextPoseQ = UnitQuaternion(nextOri);
+                res = robotOriQ.interp(nextPoseQ, [0:rotTime]'/rotTime, 'shortest');
+
+                % Return the angle interpolation
+                res = tr2rpy(res.R);
+                res = res(:,3); 
+
+                curOri = nextOri;
+                curAngle = nextAngle;
+                angles = [angles; res];
+            end
+        end
+        
+        function [angles, timeSeg] = interp2zWithT(obj, path, dt)
+            % Get SE3 robot pose with z axis rotation
+            robotPose = obj.robot.pose;
+            timeSeg = zeros(numrows(path), 1);
+
+            % Initialise rotation variables
+            curPose = SE3(robotPose.R * rotz(-pi/2), robotPose.t);
+            angles = tr2rpy(curPose);
+            angles = angles(3);
+            curP = transl(curPose);
+            curP = curP(1:2);
+            curOri = angles;
+            robotMaxV = sqrt(obj.robot.maxv(1)^2 + obj.robot.maxv(2)^2);
+
+            for n = 1:numrows(path)
+                % Get next cartesian point and compute heading angle
+                nextP = path(n,:);
+                nextOri = atan2(nextP(2) - curP(2), nextP(1) - curP(1));
+
+                % Get time for translation and rotation
+                nextPose = SE3(rotz(nextOri), [nextP, 0]');
+                relativePose = curPose.inv.T * nextPose.T;
+
+                translTime = transl(relativePose);
+                translTime = sqrt(translTime(1)^2 + translTime(2)^2);
+                translTime = abs(translTime)/robotMaxV;
+
+                rotTime = pi - abs(abs(curOri - nextOri) - pi); 
+                rotTime = rotTime/obj.robot.maxav;
+
+                % The slowest composant limit the other
+                timeTrav = max(translTime, rotTime);
+                timeSeg(n) = timeTrav;
+
+                % Orientation interpolation if needed
+                relAngle = tr2rpy(relativePose);
+                relAngle = relAngle(3);
+                if round(relAngle, 1) ~= 0
+                    % Interpolation using Quaternion function
+                    rotSteps = ceil(rotTime/dt) - 1;
+
+                    % Get the unit quaterion with only the rotation
+                    curPoseQ = curPose.T;
+                    curPoseQ(1:2,3) = 0;
+                    curPoseQ = UnitQuaternion(curPoseQ);
+
+                    nextPoseQ = nextPose.T;
+                    nextPoseQ(1:2,3) = 0;
+                    nextPoseQ = UnitQuaternion(nextPoseQ);
+
+                    resInterpQ = curPoseQ.interp(nextPoseQ, [0:rotSteps]'/rotSteps, 'shortest');
+
+                    % Taking z rotation
+                    anglesToAdd = tr2rpy(resInterpQ.R);
+                    anglesToAdd = anglesToAdd(:,3);
+
+                    % Rotate as fast as possible
+                    if rotTime < translTime
+                        additionalSteps = ceil(translTime/dt) - rotSteps + 1;
+                        anglesToAdd = [anglesToAdd; repelem(anglesToAdd(end), additionalSteps)'];
+                    end
+
+                    % Add interpolation to the result
+                    angles = [angles; anglesToAdd];
+                else
+                    lastOri = tr2rpy(curPose);
+                    lastOri = repelem(lastOri(3), ceil(translTime/dt))';
+                    angles = [angles; lastOri];
+                end
+
+                curPose = nextPose;
+                curOri = nextOri;
+                curP = nextP;
+            end
+        end
+        
         function setWheelsSpeed(obj, flS, rlS, frS, rrS)  
             res = obj.api.simxPauseCommunication(obj.vrep, true); vrchk(obj.api, res);
             obj.api.simxSetJointTargetVelocity(obj.vrep, obj.robot.wheels.flHandle, flS, obj.api.simx_opmode_oneshot);
@@ -98,8 +328,6 @@ classdef RobotController < handle
             obj.api.simxSetJointTargetVelocity(obj.vrep, obj.robot.wheels.rrHandle, rrS, obj.api.simx_opmode_oneshot);
             res = obj.api.simxPauseCommunication(obj.vrep, false); vrchk(obj.api, res);
         end
-  
-    end
-    
+    end    
 end
 
