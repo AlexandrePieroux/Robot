@@ -11,11 +11,7 @@ classdef Matcher < handle
       function obj = Matcher(imgList)
           obj.imgList = imgList;          
           obj.imgDesc = {};
-          
-          imds = imageDatastore(imgList,'Labels', imgList);
-          bag = bagOfFeatures(imds);
-          obj.classifier = trainImageCategoryClassifier(imds, bag);
-          %{
+     
           for i=1:length(imgList)
               img = imread(imgList{i});
               img = readGray(obj, img);
@@ -23,14 +19,11 @@ classdef Matcher < handle
               [featureDesc, validPoints] = extractFeatures(img, points);
               obj.imgDesc{i} = {img, featureDesc, validPoints};
           end
-          %}
       end
       
       function matches = imageMatch(obj, image)
-          %img = readGray(obj, image);
+          img = readGray(obj, image);
           
-          predict(obj.classifier, image);
-          %{
           points = detectSURFFeatures(img);
           [desc, validPoints] = extractFeatures(img, points);
  
@@ -39,7 +32,7 @@ classdef Matcher < handle
               original = obj.imgDesc{i}{1};
               pDesc = obj.imgDesc{i}{2};
               pValidPoints = obj.imgDesc{i}{3};
-              indexPairs = matchFeatures(pDesc, desc);
+              indexPairs = matchFeatures(pDesc, desc, 'MaxRatio', 0.8);
               
               matchedOriginal  = pValidPoints(indexPairs(:,1));
               matchedDistorted = validPoints(indexPairs(:,2));
@@ -47,7 +40,9 @@ classdef Matcher < handle
               [tform, inlierDistorted, inlierOriginal, status] = estimateGeometricTransform(...
                 matchedDistorted,...
                 matchedOriginal,...
-                'similarity'...
+                'projective',...
+                'MaxNumTrials', 2000,...
+                'MaxDistance', 5 ...
               );
               
               if status == 0
@@ -62,7 +57,6 @@ classdef Matcher < handle
                   status
               end
           end
-          %}
       end
       
       function grayImg = readGray(obj, img)

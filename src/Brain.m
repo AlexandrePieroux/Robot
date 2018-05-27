@@ -54,20 +54,12 @@ classdef Brain < handle
             obj.matcher = Matcher(pictures);
         end
         
-        function work(obj)
-            %%%%%%%%%% DEBUG %%%%%%%%%%%%%
-            load('map.mat');
-            obj.map = robotMap;
-            
+        function work(obj)            
             % Do a barrel roll
-            %obj.barrelRoll();
+            obj.barrelRoll();
             
             % Discover the ground map
-            %obj.discoverMap();
-            
-            %%%%%%%%%% DEBUG %%%%%%%%%%%%%
-            %robotMap = obj.map;
-            %save('map.mat', 'robotMap');
+            obj.discoverMap();
             
             % Seek for bins
             obj.discoverBins();            
@@ -82,6 +74,7 @@ classdef Brain < handle
             obj.map.update(obj.robot.hokuyo.hits, obj.robot.hokuyo.voidPoints);
             
             while(obj.setNextExplorationTrajectory())
+                obj.map.print();
                 obj.drive(true);
             end
         end
@@ -117,6 +110,7 @@ classdef Brain < handle
             mp = full(obj.map.content >= 4);
             dilatedMap = imdilate(mp, strel('disk', 5));
             erodeMap = imerode(dilatedMap, strel('disk', 5));
+            
             circles = imfindcircles(erodeMap,[7 40], 'Sensitivity', 0.88,'EdgeThreshold',0.08);
             circles = round(circles);
             
@@ -124,7 +118,7 @@ classdef Brain < handle
             circles = [circles(:,2), circles(:,1)];
             
             % Number of points to place on the map
-            numberPoints = 1000;
+            numberPoints = 300;
             
             % Compute the random tree navigation structure
             [x, y, ~] = transl(obj.robot.pose);
@@ -133,7 +127,7 @@ classdef Brain < handle
             prm = PRM(inflatedMap, 'npoints', numberPoints);
             prm.plan();
             
-            threshold = round(obj.inflateRay) * 30;
+            threshold = round(obj.inflateRay) * 10;
             
             % For each circle shape detected on the map
             for n = 1:numrows(circles)
@@ -156,12 +150,9 @@ classdef Brain < handle
                 robotAngle = robotAngle(3);
                                 
                 circleAngle = atan2(circle(1) - rposR, circle(2) - rposC);
-                angle = circleAngle - robotAngle;
-                
-                if angle >= 0.1
-                    ori = ori * rotz(angle);
-                    obj.controller.drivePose(obj.map, ori, obj.dt);
-                end
+                angle = circleAngle - robotAngle;                
+                ori = ori * rotz(angle);
+                obj.controller.drivePose(obj.map, ori, obj.dt);
 
                 % Take a picture and match it against the pictures
                 image = obj.controller.takePicture(); 
@@ -224,11 +215,16 @@ classdef Brain < handle
                 % in obstacles)
                 circle = circles(m,:);
                 [~, v] = prm.graph.distances([circle(2), circle(1)]);
-                v = v(v > threshold);
-                goal = prm.graph.coord(v(1));
+                
+                for o = 1:size(v)
+                    goal = prm.graph.coord(v(o));
+                    if pdist2([circle(2), circle(1)], goal', 'euclidean') >= threshold
+                        break;
+                    end
+                end
 
                 % Plan the path to the circle coordinates
-                newPathToCircle = prm.query([start(1), start(2)], goal');
+                newPathToCircle = prm.query(start, goal');
                 newDistancePath = obj.getPathCost(newPathToCircle);
 
                 if newDistancePath < distancePath
