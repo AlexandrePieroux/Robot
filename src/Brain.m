@@ -54,12 +54,20 @@ classdef Brain < handle
             obj.matcher = Matcher(pictures);
         end
         
-        function work(obj)            
+        function work(obj)
+            %%%%%%%%%% DEBUG %%%%%%%%%%%%%
+            load('map.mat');
+            obj.map = robotMap;
+
             % Do a barrel roll
-            obj.barrelRoll();
-            
+            %obj.barrelRoll();
+          
             % Discover the ground map
-            obj.discoverMap();
+            %obj.discoverMap();
+            
+            %%%%%%%%%% DEBUG %%%%%%%%%%%%%
+            %robotMap = obj.map;
+            %save('map.mat', 'robotMap');
             
             % Seek for bins
             obj.discoverBins();            
@@ -156,7 +164,7 @@ classdef Brain < handle
 
                 % Take a picture and match it against the pictures
                 image = obj.controller.takePicture(); 
-                obj.matcher.imageMatch(image);
+                obj.matcher.imageMatch(image)
                
                 circles(idx,:) = []; 
             end

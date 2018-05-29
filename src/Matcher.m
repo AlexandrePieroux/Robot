@@ -44,17 +44,19 @@ classdef Matcher < handle
                 'MaxNumTrials', 2000,...
                 'MaxDistance', 5 ...
               );
-              
+          
               if status == 0
-                  outputView = imref2d(size(original));
-                  recovered  = imwarp(img, tform, 'OutputView', outputView);
-                  figure, imshowpair(original,recovered,'montage');
-                  
-                  z = imabsdiff(original, recovered);
-                  figure, imshow(z);
+                  if size(inlierDistorted.Location, 1) >= 3
+                      distordedPc = pointCloud([inlierDistorted.Location, zeros(inlierDistorted.Count, 1)]);
+                      originalPc = pointCloud([inlierOriginal.Location, zeros(inlierOriginal.Count, 1)]);
+
+                      [~, ~, rmse] = pcregrigid(distordedPc, originalPc);
+                      matches(i) = rmse;
+                  else
+                      matches(i) = Inf;
+                  end
               else
-                  disp('Error:')
-                  status
+                  matches(i) = Inf;
               end
           end
       end
