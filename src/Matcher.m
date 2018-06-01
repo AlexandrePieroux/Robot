@@ -45,16 +45,12 @@ classdef Matcher < handle
                 'MaxDistance', 5 ...
               );
           
-              if status == 0
-                  if size(inlierDistorted.Location, 1) >= 3
-                      distordedPc = pointCloud([inlierDistorted.Location, zeros(inlierDistorted.Count, 1)]);
-                      originalPc = pointCloud([inlierOriginal.Location, zeros(inlierOriginal.Count, 1)]);
+              if status == 0 && size(inlierDistorted.Location, 1) >= 3
+                  distordedPc = pointCloud([inlierDistorted.Location, zeros(inlierDistorted.Count, 1)]);
+                  originalPc = pointCloud([inlierOriginal.Location, zeros(inlierOriginal.Count, 1)]);
 
-                      [~, ~, rmse] = pcregrigid(distordedPc, originalPc);
-                      matches(i) = rmse;
-                  else
-                      matches(i) = Inf;
-                  end
+                  [~, ~, rmse] = pcregrigid(distordedPc, originalPc);
+                  matches(i) = rmse;
               else
                   matches(i) = Inf;
               end
