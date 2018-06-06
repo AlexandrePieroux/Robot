@@ -52,7 +52,7 @@ classdef Matcher < handle
                   [~, ~, rmse] = pcregrigid(distordedPc, originalPc);
                   matches(i) = rmse;
               else
-                  matches(i) = Inf;
+                  matches(i) = 0;
               end
           end
       end

@@ -157,38 +157,42 @@ classdef Brain < handle
         end        
         
         function matchCircle(obj, cirlceCenter)
-            closests = obj.nPointsClose(cirlceCenter, round(obj.inflateRay) * 10, 5);
+            closests = obj.nPointsClose(cirlceCenter, round(obj.inflateRay) * 3, 5);
+            
+            % Get robot pose information
+            [x, y, ~] = transl(obj.robot.pose);
+            [rposR, rposC] = obj.map.world2Map(x, y);
+            
             for n = 1:numrows(closests)
-                close = closests(n,:);
-                
-                % Get robot pose information
-                [x, y, ~] = transl(obj.robot.pose);
-                [rposR, rposC] = obj.map.world2Map(x, y);
-
-                obj.path = obj.prm.query([rposC, rposR], close);
+                closePoint = closests(n,:);
+        
+                obj.path = obj.prm.query([rposC, rposR], [closePoint(2), closePoint(1)]);
                 [obj.path(:,1), obj.path(:,2)] = obj.map.map2World(obj.path(:,2), obj.path(:,1));
 
                  % Drive to the closest detected circle
                 obj.drive(true);
+                
+                % Update robot pose information after the drive
+                [x, y, ~] = transl(obj.robot.pose);
+                [rposR, rposC] = obj.map.world2Map(x, y);
 
                 % Plan the poses to face the center of the circle
-                ori = obj.robot.se2.T;
-                robotAngle = tr2rpy(ori);
-                robotAngle = robotAngle(3);
-
                 circleAngle = atan2(cirlceCenter(1) - rposR, cirlceCenter(2) - rposC);
-                angle = circleAngle - robotAngle;                
-                ori = ori * rotz(angle);
+                angle = wrapToPi(circleAngle - obj.robot.se2.angle());                
+                ori = obj.robot.se2.T * rotz(angle);
                 obj.controller.drivePose(obj.map, ori, obj.dt);
 
                 % Take a picture and match it against the pictures
                 image = obj.controller.takePicture(); 
-                matches = obj.matcher.imageMatch(image);
+                imgMatches = obj.matcher.imageMatch(image);
                 
                 thresholdMatching = 170;
 
-                if matches > thresholdMatching
+                if imgMatches > thresholdMatching
                     disp('Strong match found');
+                    [v, I] = max(imgMatches);
+                    obj.matcher.imgList{I};
+                    imgMatches
                     break;
                 end
                 
@@ -218,7 +222,7 @@ classdef Brain < handle
             obj.prm = PRM(inflatedMap, 'npoints', numberPoints);
             obj.prm.plan();
             
-            threshold = round(obj.inflateRay) * 10;
+            threshold = round(obj.inflateRay) * 2;
             
             % For each circle shape detected on the map
             for n = 1:numrows(circles)
