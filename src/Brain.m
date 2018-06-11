@@ -113,41 +113,64 @@ classdef Brain < handle
             obj.controller.drivePath(obj.map, wayPoints, obj.dt, obj.at)
         end
         
-        function idx = nPointsClose(obj, point, threshold, numberOfPoints)
+        function [circles, radiuses] = findCircles(obj, mapThreshold, inflateRay, radiusRange)
+            % Dilation of the map
+            mp = full(obj.map.content >= mapThreshold);
+            closedMap = imclose(mp, strel('disk', inflateRay));
+            
+            [circles, radiuses] = imfindcircles(closedMap,radiusRange, 'Sensitivity', 0.88,'EdgeThreshold',0.08);
+            circles = round(circles);
+            
+            % Invert coordinate to match row col format
+            circles = [circles(:,2), circles(:,1)];
+        end
+        
+        function pathCost = getPathCost(obj, path)
+            pathCost = 0;
+            p1 = path(1,:);
+
+            for o = 2:numrows(path)
+                p2 = path(o,:);
+                pathCost = pathCost + pdist2(p1, p2, 'euclidean');
+                p1 = p2;
+            end
+        end
+        
+        function idx = nPointsClose(obj, point, threshold, pathMaxDist, numberOfPoints)
             [~, v] = obj.prm.graph.distances(point);
             idx = [];
             
+            % Get robot pose information
+            [x, y, ~] = transl(obj.robot.pose);
+            [rposR, rposC] = obj.map.world2Map(x, y);
+            
             for o = 1:numcols(v)
                 goal = obj.prm.graph.coord(v(o));
+                
                 if pdist2(point, goal', 'euclidean') >= threshold
-                    idx = [idx; goal'];
-                    if numrows(idx) >= numberOfPoints
-                        break;
+                    % Plan the path to the circle coordinates
+                    pathToCircle = obj.prm.query([rposC, rposR], goal');
+                    distancePath = obj.getPathCost(pathToCircle);
+                    
+                    if distancePath <= pathMaxDist
+                        idx = [idx; goal'];
+                        if numrows(idx) >= numberOfPoints
+                            break;
+                        end
                     end
                 end
             end
         end
         
         function idx = closestCircle(obj, start, circles, threshold)
-            function pathCost = getPathCost(path)
-                pathCost = 0;
-                p1 = path(1,:);
-
-                for o = 2:numrows(path)
-                    p2 = path(o,:);
-                    pathCost = pathCost + pdist2(p1, p2, 'euclidean');
-                    p1 = p2;
-                end
-            end
-            
             distancePath = Inf;
             for m = 1:numrows(circles)
                 circle = circles(m,:);
-                goal = obj.nPointsClose([circle(2), circle(1)], threshold, 1);
+                goal = obj.nPointsClose([circle(2), circle(1)], threshold, round(obj.inflateRay) * 10, 1);
 
                 % Plan the path to the circle coordinates
                 newPathToCircle = obj.prm.query(start, goal');
-                newDistancePath = getPathCost(newPathToCircle);
+                newDistancePath = obj.getPathCost(newPathToCircle);
 
                 if newDistancePath < distancePath
                     distancePath = newDistancePath;
@@ -156,8 +179,9 @@ classdef Brain < handle
             end
         end        
         
-        function matchCircle(obj, cirlceCenter)
-            closests = obj.nPointsClose(cirlceCenter, round(obj.inflateRay) * 3, 5);
+        function matchCircle(obj, cirlceCenter, circleRadius)
+            % Get the n closest point of the given circle center
+            closests = obj.nPointsClose(cirlceCenter, round(obj.inflateRay) * 3, round(obj.inflateRay) * 4, 5);
             
             % Get robot pose information
             [x, y, ~] = transl(obj.robot.pose);
@@ -194,6 +218,8 @@ classdef Brain < handle
                     obj.matcher.imgList{I};
                     imgMatches
                     break;
+                else
+                    imgMatches
                 end
                 
                 disp('The search continue...');
@@ -202,15 +228,7 @@ classdef Brain < handle
         
         function discoverBins(obj)
             % Find bins
-            mp = full(obj.map.content >= 4);
-            dilatedMap = imdilate(mp, strel('disk', 5));
-            erodeMap = imerode(dilatedMap, strel('disk', 5));
-            
-            circles = imfindcircles(erodeMap,[7 40], 'Sensitivity', 0.88,'EdgeThreshold',0.08);
-            circles = round(circles);
-            
-            % Invert coordinate to match row col format
-            circles = [circles(:,2), circles(:,1)];
+            [circles, radiuses] = obj.findCircles(4, 5, [7 40]);
             
             % Number of points to place on the map
             numberPoints = 300;
@@ -226,13 +244,16 @@ classdef Brain < handle
             
             % For each circle shape detected on the map
             for n = 1:numrows(circles)
-                % Get shortest path
+                % Get robot position
                 [x, y, ~] = transl(obj.robot.pose);
                 [rposR, rposC] = obj.map.world2Map(x, y);
+                
+                % Get the closest points circle 
                 idxes = obj.closestCircle([rposC, rposR], circles, threshold);
-                closest = circles(idxes,:);
-
-                obj.matchCircle(closest);
+                closestCircle = circles(idxes,:);
+                circleRadius = double(round(radiuses(idxes)));
+                
+                obj.matchCircle(closestCircle, circleRadius);
                 
                 circles(idxes,:) = []; 
             end
