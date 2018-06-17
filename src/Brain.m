@@ -136,7 +136,43 @@ classdef Brain < handle
             end
         end
         
-        function idx = nPointsClose(obj, point, threshold, pathMaxDist, numberOfPoints)
+        function idx = nPointsClose(obj, point, threshold, numberOfPoints, circleRadius)
+            function isClear = clearSight(x, y)
+                % Determine if there can be a straight line between the two
+                % given points
+                mat = zeros(size(obj.map.content, 1), size(obj.map.content, 2), 'uint8');
+                nPoints = max(abs(diff(x)), abs(diff(y)))+1;
+
+                rIndex = round(linspace(x(1), y(1), nPoints));
+                cIndex = round(linspace(x(2), y(2), nPoints));
+                index = sub2ind(size(mat), rIndex, cIndex);
+                mat(index) = 255;
+
+                mapToProcess = double(obj.map.content >= obj.classTreshold);
+                cirlceToCarve = strel('disk', circleRadius);
+            
+                [row, col] = size(cirlceToCarve.Neighborhood);
+                subRow = round((row - 1)/2);
+                subCol = round((col - 1)/2);
+
+                coordMin = point - [subRow, subCol];
+                coordMax = point + [row - subRow - 1, col - subCol - 1];
+
+                % Carve the inflated robot position to avoid the robot to be
+                % 'ate' by the obstacle inflate.
+                circleZone = mapToProcess(coordMin(1):coordMax(1), coordMin(2):coordMax(2));
+                circleZone(cirlceToCarve.Neighborhood) = 0;
+                mapToProcess(coordMin(1):coordMax(1), coordMin(2):coordMax(2)) = circleZone;
+
+                imshowpair(full(mapToProcess),mat)
+                
+                if any(mapToProcess(logical(mat)))
+                    isClear = false;
+                else
+                    isClear = true;
+                end
+            end
+            
             [~, v] = obj.prm.graph.distances(point);
             idx = [];
             
@@ -147,16 +183,18 @@ classdef Brain < handle
             for o = 1:numcols(v)
                 goal = obj.prm.graph.coord(v(o));
                 
-                if pdist2(point, goal', 'euclidean') >= threshold
+                % Keep the goal if there is a clear line sight to the goal
+                % to take the picture
+                if circleRadius == 0
+                    isInSight = true;
+                else
+                    isInSight = clearSight(point, goal');
+                end
+                if pdist2(point, goal', 'euclidean') >= threshold && isInSight
                     % Plan the path to the circle coordinates
-                    pathToCircle = obj.prm.query([rposC, rposR], goal');
-                    distancePath = obj.getPathCost(pathToCircle);
-                    
-                    if distancePath <= pathMaxDist
-                        idx = [idx; goal'];
-                        if numrows(idx) >= numberOfPoints
-                            break;
-                        end
+                    idx = [idx; goal'];
+                    if numrows(idx) >= numberOfPoints
+                        break;
                     end
                 end
             end
@@ -166,7 +204,7 @@ classdef Brain < handle
             distancePath = Inf;
             for m = 1:numrows(circles)
                 circle = circles(m,:);
-                goal = obj.nPointsClose([circle(2), circle(1)], threshold, round(obj.inflateRay) * 10, 1);
+                goal = obj.nPointsClose([circle(2), circle(1)], threshold, 1, 0);
 
                 % Plan the path to the circle coordinates
                 newPathToCircle = obj.prm.query(start, goal');
@@ -181,7 +219,7 @@ classdef Brain < handle
         
         function matchCircle(obj, cirlceCenter, circleRadius)
             % Get the n closest point of the given circle center
-            closests = obj.nPointsClose(cirlceCenter, round(obj.inflateRay) * 3, round(obj.inflateRay) * 4, 5);
+            closests = obj.nPointsClose(cirlceCenter, round(obj.inflateRay) * 3, 3, circleRadius);
             
             % Get robot pose information
             [x, y, ~] = transl(obj.robot.pose);
@@ -212,7 +250,7 @@ classdef Brain < handle
                 
                 thresholdMatching = 170;
 
-                if imgMatches > thresholdMatching
+                if any(imgMatches > thresholdMatching)
                     disp('Strong match found');
                     [v, I] = max(imgMatches);
                     obj.matcher.imgList{I};
