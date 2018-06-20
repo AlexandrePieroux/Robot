@@ -141,15 +141,18 @@ classdef Brain < handle
                 % Determine if there can be a straight line between the two
                 % given points
                 mat = zeros(size(obj.map.content, 1), size(obj.map.content, 2), 'uint8');
-                nPoints = max(abs(diff(x)), abs(diff(y)))+1;
+                nPoints = max(abs(x(1) - y(1)), abs(x(2) - y(2)))+1;
 
-                rIndex = round(linspace(x(1), y(1), nPoints));
                 cIndex = round(linspace(x(2), y(2), nPoints));
+                rIndex = round(linspace(x(1), y(1), nPoints));
                 index = sub2ind(size(mat), rIndex, cIndex);
                 mat(index) = 255;
 
-                mapToProcess = double(obj.map.content >= obj.classTreshold);
-                cirlceToCarve = strel('disk', circleRadius);
+                cirlceToCarve = strel('disk', round(circleRadius * 0.7));
+                
+                % Dilation of the map
+                mapToProcess = full(obj.map.content >= obj.classTreshold);
+                mapToProcess = imclose(mapToProcess, strel('disk', 5));
             
                 [row, col] = size(cirlceToCarve.Neighborhood);
                 subRow = round((row - 1)/2);
@@ -157,6 +160,9 @@ classdef Brain < handle
 
                 coordMin = point - [subRow, subCol];
                 coordMax = point + [row - subRow - 1, col - subCol - 1];
+                
+                coordMin = [max(coordMin(1), 0), max(coordMin(2), 0)];
+                coordMax = [max(coordMax(1), 0), max(coordMax(2), 0)];
 
                 % Carve the inflated robot position to avoid the robot to be
                 % 'ate' by the obstacle inflate.
@@ -190,7 +196,7 @@ classdef Brain < handle
                 else
                     isInSight = clearSight(point, goal');
                 end
-                if pdist2(point, goal', 'euclidean') >= threshold && isInSight
+                if ~obj.prm.isoccupied(goal') && pdist2(point, goal', 'euclidean') >= threshold && isInSight
                     % Plan the path to the circle coordinates
                     idx = [idx; goal'];
                     if numrows(idx) >= numberOfPoints
@@ -253,7 +259,7 @@ classdef Brain < handle
                 if any(imgMatches > thresholdMatching)
                     disp('Strong match found');
                     [v, I] = max(imgMatches);
-                    obj.matcher.imgList{I};
+                    obj.matcher.imgList{I}
                     imgMatches
                     break;
                 else
