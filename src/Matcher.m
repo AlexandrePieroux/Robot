@@ -32,7 +32,7 @@ classdef Matcher < handle
               original = obj.imgDesc{i}{1};
               pDesc = obj.imgDesc{i}{2};
               pValidPoints = obj.imgDesc{i}{3};
-              indexPairs = matchFeatures(pDesc, desc, 'MaxRatio', 0.8);
+              indexPairs = matchFeatures(pDesc, desc, 'MaxRatio', 0.6);
               
               matchedOriginal  = pValidPoints(indexPairs(:,1));
               matchedDistorted = validPoints(indexPairs(:,2));

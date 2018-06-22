@@ -57,18 +57,18 @@ classdef Brain < handle
         
         function work(obj)
             %%%%%%%%%% DEBUG %%%%%%%%%%%%%
-            load('map.mat');
-            obj.map = robotMap;
+            %load('map.mat');
+            %obj.map = robotMap;
 
             % Do a barrel roll
-            %obj.barrelRoll();
+            obj.barrelRoll();
           
             % Discover the ground map
-            %obj.discoverMap();
+            obj.discoverMap();
             
             %%%%%%%%%% DEBUG %%%%%%%%%%%%%
-            %robotMap = obj.map;
-            %save('map.mat', 'robotMap');
+            robotMap = obj.map;
+            save('map.mat', 'robotMap');
             
             % Seek for bins
             obj.discoverBins();            
@@ -86,6 +86,7 @@ classdef Brain < handle
                 obj.map.print();
                 obj.drive(true);
             end
+            obj.map.print();
         end
         
         function barrelRoll(obj)  
@@ -148,9 +149,9 @@ classdef Brain < handle
                 index = sub2ind(size(mat), rIndex, cIndex);
                 mat(index) = 255;
 
-                cirlceToCarve = strel('disk', round(circleRadius * 0.7));
+                cirlceToCarve = strel('disk', double(round(circleRadius * 0.6)));
                 
-                % Dilation of the map
+                % Closing of the map
                 mapToProcess = full(obj.map.content >= obj.classTreshold);
                 mapToProcess = imclose(mapToProcess, strel('disk', 5));
             
@@ -160,9 +161,6 @@ classdef Brain < handle
 
                 coordMin = point - [subRow, subCol];
                 coordMax = point + [row - subRow - 1, col - subCol - 1];
-                
-                coordMin = [max(coordMin(1), 0), max(coordMin(2), 0)];
-                coordMax = [max(coordMax(1), 0), max(coordMax(2), 0)];
 
                 % Carve the inflated robot position to avoid the robot to be
                 % 'ate' by the obstacle inflate.
